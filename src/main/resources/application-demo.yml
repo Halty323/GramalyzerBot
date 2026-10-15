@@ -1,0 +1,8 @@
+gramalyzer:
+  demo: true
+spring:
+  datasource:
+    url: jdbc:h2:file:./.data/demo;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE
+telegram:
+  bot:
+    enabled: false

@@ -1,0 +1,25 @@
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:h2:file:./.data/gramalyzer;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE}
+    username: ${SPRING_DATASOURCE_USERNAME:sa}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+  web:
+    resources:
+      static-locations: ${GRAMALYZER_WEB_ROOT:file:../GramalyzerVibe/dist/}
+server:
+  port: ${PORT:8080}
+  address: ${HOST:127.0.0.1}
+  forward-headers-strategy: framework
+telegram:
+  bot:
+    enabled: ${TELEGRAM_BOT_ENABLED:false}
+    token: ${TELEGRAM_BOT_TOKEN:}
+gramalyzer:
+  demo: ${DEMO_MODE:false}
+  api-token: ${GRAMALYZER_API_TOKEN:}
