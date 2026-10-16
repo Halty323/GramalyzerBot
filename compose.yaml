@@ -1,0 +1,50 @@
+# Live setup: PostgreSQL + Gramalyzer (backend, Telegram bot and website) on http://localhost:8080
+#
+#   cp .env.example .env        # fill in at least POSTGRES_PASSWORD and GRAMALYZER_API_TOKEN
+#   docker compose up -d --build
+#
+# Needs the GramalyzerVibe checkout next to this one (../GramalyzerVibe), or set GRAMALYZER_VIBE_DIR in .env.
+# For the sample-data demo without Telegram, use compose.demo.yaml instead.
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: gramalyzer
+      POSTGRES_USER: gramalyzer
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gramalyzer -d gramalyzer"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      additional_contexts:
+        vibe: ${GRAMALYZER_VIBE_DIR:-../GramalyzerVibe}
+    image: gramalyzer:local
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/gramalyzer
+      SPRING_DATASOURCE_USERNAME: gramalyzer
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      GRAMALYZER_API_TOKEN: ${GRAMALYZER_API_TOKEN:?set GRAMALYZER_API_TOKEN in .env}
+      TELEGRAM_BOT_ENABLED: ${TELEGRAM_BOT_ENABLED:-false}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      BOT_ADMIN_IDS: ${BOT_ADMIN_IDS:-}
+      BOT_PUBLIC_REGISTRATION: ${BOT_PUBLIC_REGISTRATION:-true}
+      BOT_DEFAULT_TIMEZONE: ${BOT_DEFAULT_TIMEZONE:-UTC}
+    ports:
+      # Only reachable from this machine. Put a reverse proxy with HTTPS in front before exposing it.
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+
+volumes:
+  db-data:
