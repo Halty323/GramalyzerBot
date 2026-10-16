@@ -32,6 +32,29 @@ public class User {
     @Column(name = "last_seen_at")
     private Instant lastSeenAt;
 
+    /** Bot-wide administrator (can open /admin). */
+    @Column(name = "bot_admin", nullable = false)
+    private boolean botAdmin;
+
+    @Column(nullable = false)
+    private boolean banned;
+
+    @Column(name = "language_code")
+    private String languageCode;
+
+    /** The channel the person is currently looking at. */
+    @Column(name = "active_channel_id")
+    private Long activeChannelId;
+
+    /** Pending multi-step prompt (e.g. "type your city"), with its argument and expiry. */
+    private String state;
+
+    @Column(name = "state_arg")
+    private String stateArg;
+
+    @Column(name = "state_expires_at")
+    private Instant stateExpiresAt;
+
     public User(Long telegramId, String username, String firstName) {
         this.telegramId = telegramId;
         this.username = username;
@@ -39,27 +62,14 @@ public class User {
         this.createdAt = Instant.now();
     }
 
-    public User(Long id, Long telegramId, String username, String firstName, Instant createdAt, Instant lastSeenAt) {
-        this.id = id;
-        this.telegramId = telegramId;
-        this.username = username;
-        this.firstName = firstName;
-        this.createdAt = createdAt;
-        this.lastSeenAt = lastSeenAt;
+    @PrePersist
+    void onCreate() {
+        if (createdAt == null) createdAt = Instant.now();
     }
 
-    public User(Long id, Long telegramId, String username, String firstName, Instant createdAt) {
-        this.id = id;
-        this.telegramId = telegramId;
-        this.username = username;
-        this.firstName = firstName;
-        this.createdAt = createdAt;
-    }
-
-    public User(Long id, Long telegramId, String username, String firstName) {
-        this.id = id;
-        this.telegramId = telegramId;
-        this.username = username;
-        this.firstName = firstName;
+    public String displayName() {
+        if (firstName != null && !firstName.isBlank()) return firstName;
+        if (username != null && !username.isBlank()) return "@" + username;
+        return "User " + telegramId;
     }
 }
