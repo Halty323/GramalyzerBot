@@ -1,8 +1,29 @@
 {
   "properties": [
     {
-      "name": "spring.telegram.bot.token",
+      "name": "telegram.bot.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Start Telegram long polling and the posting worker. Off by default and always off in the demo profile."
+    },
+    {
+      "name": "telegram.bot.token",
       "type": "java.lang.String",
-      "description": "Description for spring.telegram.bot.token."
-  }
-] }
+      "description": "Bot token from @BotFather. Provide via the TELEGRAM_BOT_TOKEN environment variable."
+    },
+    {
+      "name": "telegram.bot.admin-ids",
+      "type": "java.util.List<java.lang.Long>",
+      "description": "Telegram user ids that are bot administrators."
+    },
+    {
+      "name": "telegram.bot.public-registration",
+      "type": "java.lang.Boolean",
+      "description": "Initial value of whether anyone may connect a channel."
+    },
+    {
+      "name": "telegram.bot.default-timezone",
+      "type": "java.lang.String",
+      "description": "Timezone assigned to newly connected channels."
+    }
+  ]
+}

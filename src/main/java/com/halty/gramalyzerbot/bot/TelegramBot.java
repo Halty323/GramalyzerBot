@@ -1,70 +1,47 @@
 package com.halty.gramalyzerbot.bot;
 
-import com.halty.gramalyzerbot.bot.handler.RandomHandler;
-import com.halty.gramalyzerbot.bot.handler.StartHandler;
+import com.halty.gramalyzerbot.crm.CrmBridge;
 import lombok.RequiredArgsConstructor;
-import org.jspecify.annotations.NonNull;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.longpolling.interfaces.LongPollingUpdateConsumer;
-import org.telegram.telegrambots.longpolling.starter.SpringLongPollingBot;
 import org.telegram.telegrambots.meta.api.objects.Update;
 
 import java.util.List;
 
+/**
+ * The single consumer of Telegram updates, shared by the CRM workspace and the analytics bot.
+ * Each update is first shown to the CRM ({@link CrmBridge#observe}: channel discovery and channel posts), then
+ * handed to {@link UpdateRouter}, which does all the analytics bot's work.
+ * <p>
+ * Only exists when {@code telegram.bot.enabled=true}; the demo profile and the tests never poll Telegram.
+ * {@link BotRegistration} connects it to Telegram.
+ */
 @Component
-@ConditionalOnProperty(name="telegram.bot.enabled", havingValue="true")
+@ConditionalOnProperty(name = "telegram.bot.enabled", havingValue = "true")
 @RequiredArgsConstructor
-public class TelegramBot implements SpringLongPollingBot, LongPollingUpdateConsumer {
+@Slf4j
+public class TelegramBot implements LongPollingUpdateConsumer {
 
-    private final StartHandler startHandler;
-    private final RandomHandler randomHandler;
-    private final com.halty.gramalyzerbot.workspace.WorkspaceService workspace;
-
-    @Value("${telegram.bot.token}")
-    private String token;
+    private final UpdateMapper mapper;
+    private final UpdateRouter router;
+    private final CrmBridge crm;
 
     @Override
-    public String getBotToken() {
-        return token;
-    }
-
-    @Override
-    public LongPollingUpdateConsumer getUpdatesConsumer() {
-        return this;
-    }
-
-    @Override
-    public void consume(@NonNull List<Update> updates) {
+    public void consume(List<Update> updates) {
         for (Update update : updates) {
-            handleUpdate(update);
-        }
-    }
-
-    private void handleUpdate(@NonNull Update update) {
-        if (update.hasMyChatMember()) {
-            var membership = update.getMyChatMember();
-            var chat = membership.getChat();
-            if ("channel".equals(chat.getType())) {
-                var member = membership.getNewChatMember();
-                boolean canPost = member instanceof org.telegram.telegrambots.meta.api.objects.chatmember.ChatMemberAdministrator admin && Boolean.TRUE.equals(admin.getCanPostMessages());
-                workspace.registerChannel(chat.getId(), chat.getTitle(), chat.getUserName(), canPost);
+            // Two independent consumers: a failure in one must never starve the other, or the rest of the batch.
+            try {
+                crm.observe(update);
+            } catch (Throwable t) {
+                log.error("CRM could not process update {}", update.getUpdateId(), t);
             }
-            return;
-        }
-        if (update.hasChannelPost()) {
-            var post = update.getChannelPost();
-            workspace.channelPost(post.getChatId(), post.getMessageId(), post.getText() != null ? post.getText() : post.getCaption(), post.getDate());
-            return;
-        }
-        if (!update.hasMessage() || !update.getMessage().hasText() || update.getMessage().getFrom() == null) return;
-
-        String text = update.getMessage().getText();
-        if (text.equals("/start")) {
-            startHandler.handle(update);
-        } else if (text.equals("/random") || text.equals("Get random number")) {
-            randomHandler.handle(update);
+            try {
+                mapper.map(update).ifPresent(router::route);
+            } catch (Throwable t) {
+                log.error("Failed to process update {}", update.getUpdateId(), t);
+            }
         }
     }
 }

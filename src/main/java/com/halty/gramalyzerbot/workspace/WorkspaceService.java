@@ -3,6 +3,7 @@ package com.halty.gramalyzerbot.workspace;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import java.time.*;
 import java.util.*;
@@ -11,10 +12,11 @@ import static com.halty.gramalyzerbot.workspace.Models.*;
 @Service
 public class WorkspaceService {
     public static class Problem extends RuntimeException {public final int status; public Problem(int status, String message) {super(message); this.status=status;}}
-    private final WorkspaceStore store; private final ObjectMapper mapper; private final boolean demo; private final boolean botEnabled;
-    public WorkspaceService(WorkspaceStore store, ObjectMapper mapper, @Value("${gramalyzer.demo:false}") boolean demo, @Value("${telegram.bot.enabled:false}") boolean botEnabled) {this.store=store; this.mapper=mapper; this.demo=demo; this.botEnabled=botEnabled&&!demo;}
+    private final WorkspaceStore store; private final ObjectMapper mapper; private final ApplicationEventPublisher events; private final boolean demo; private final boolean botEnabled;
+    public WorkspaceService(WorkspaceStore store, ObjectMapper mapper, ApplicationEventPublisher events, @Value("${gramalyzer.demo:false}") boolean demo, @Value("${telegram.bot.enabled:false}") boolean botEnabled) {this.store=store; this.mapper=mapper; this.events=events; this.demo=demo; this.botEnabled=botEnabled&&!demo;}
     public Workspace workspace() {return new Workspace(store.channels(), store.posts(), demo, store.history(), botEnabled);}
     public Channel channel(String id) {return store.channel(id).orElseThrow(() -> new Problem(404,"Channel not found."));}
+    public Optional<Channel> byTelegramChat(long chatId) {return store.telegramChannel(chatId);}
     public Post post(String id) {return store.post(id).orElseThrow(() -> new Problem(404,"Post not found."));}
     public synchronized Channel settings(String id, ObjectNode input) {
         Channel c = channel(id);
@@ -24,7 +26,9 @@ public class WorkspaceService {
         if (input.has("timezone")) {try {if (!input.get("timezone").isTextual()) throw new Exception(); ZoneId.of(input.get("timezone").asText());} catch(Exception e) {throw new Problem(400,"Invalid timezone.");}}
         if (input.has("signature") && (!input.get("signature").isTextual() || input.get("signature").asText().length()>200)) throw new Problem(400,"Signature must be at most 200 characters.");
         ObjectNode data = mapper.valueToTree(c); data.setAll(input);
-        return store.saveChannel(mapper.convertValue(data, Channel.class));
+        Channel saved = store.saveChannel(mapper.convertValue(data, Channel.class));
+        if (!saved.timezone().equals(c.timezone())) events.publishEvent(new WorkspaceEvents.TimezoneChanged(saved.id(), saved.telegramChatId(), saved.timezone()));
+        return saved;
     }
     public Post save(String id, PostInput input) {
         Channel c = channel(input.channelId());
