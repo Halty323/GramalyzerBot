@@ -50,6 +50,15 @@ public class WorkspaceStore {
     public boolean hasReceipt(String channelId,long messageId) {return !jdbc.queryForList("SELECT id FROM workspace_posts WHERE channel_id=? AND telegram_message_id=?",String.class,channelId,messageId).isEmpty();}
     public void deliveryFailed(String id, boolean uncertain, String error) {jdbc.update("UPDATE workspace_posts SET delivery_state=?,delivery_error=? WHERE id=? AND delivery_state='sending'", uncertain ? "uncertain" : "failed", error, id);}
     public void recoverInterrupted() {jdbc.update("UPDATE workspace_posts SET delivery_state='uncertain',delivery_error='Delivery was interrupted. Check Telegram before creating a replacement.' WHERE delivery_state='sending'");}
+    /** Telegram's reaction total for a channel message, copied onto the CRM post that was published as that message. */
+    public int recordReactions(String channelId, long messageId, long reactions) {
+        int n = 0;
+        for (Post p : jdbc.query("SELECT * FROM workspace_posts WHERE channel_id=? AND telegram_message_id=?", this::mapPost, channelId, messageId)) {
+            ObjectNode data = mapper.valueToTree(p); data.put("reactions", reactions);
+            n += jdbc.update("UPDATE workspace_posts SET data=? WHERE id=?", json(data), p.id());
+        }
+        return n;
+    }
     public List<History> history() {return jdbc.query("SELECT channel_id,metric_date,subscribers FROM channel_daily_metrics ORDER BY metric_date", (rs, row) -> new History(rs.getString(1), rs.getDate(2).toLocalDate().toString(), rs.getLong(3)));}
     @Transactional
     public void recordSubscribers(String id, long count) {
