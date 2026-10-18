@@ -38,7 +38,7 @@ docker compose -f compose.demo.yaml up --build          # → http://localhost:8
 # live: PostgreSQL + bot + website
 cp .env.example .env                                    # set POSTGRES_PASSWORD, GRAMALYZER_API_TOKEN, and the Telegram settings
 docker compose up -d --build                            # → http://localhost:8080
-docker compose logs -f app                              # first start: look for "/claim CODE" if BOT_ADMIN_IDS is empty
+docker compose logs -f app                              # first start: look for "/claim CODE" if BOT_ADMINS is empty
 ```
 
 * **Data:** the live database lives in the `db-data` volume; the demo's H2 files live in `demo-data`.
@@ -53,7 +53,7 @@ docker compose logs -f app                              # first start: look for 
 | `GRAMALYZER_API_TOKEN` | yes, outside demo | Token the website signs in with |
 | `TELEGRAM_BOT_ENABLED` | – | `true` starts long polling, the posting worker and the analytics jobs |
 | `TELEGRAM_BOT_TOKEN` | when enabled | From @BotFather. **Never commit it.** |
-| `BOT_ADMIN_IDS` | – | Comma-separated Telegram user ids allowed to open `/admin` in the bot. If empty, the log prints a one-time `/claim CODE` at startup. |
+| `BOT_ADMINS` | – | Who may open `/admin` in the bot: comma-separated `@usernames` and/or numeric user ids, e.g. `@halty,123456789`. A username takes effect when that person next messages the bot. If empty, the log prints a one-time `/claim CODE` at startup. (`BOT_ADMIN_IDS` still works as the old name.) |
 | `BOT_PUBLIC_REGISTRATION` | – | `true` (default): anyone may connect a channel; can be switched later in `/admin` |
 | `BOT_DEFAULT_TIMEZONE` | – | Timezone for newly connected channels until someone sets one (default `UTC`) |
 | `SPRING_DATASOURCE_URL` / `_USERNAME` / `_PASSWORD` | – | PostgreSQL in production. The default is a local H2 file. |
