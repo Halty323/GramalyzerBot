@@ -98,6 +98,7 @@ All under `/api`, with the same auth as before (session cookie from `POST /api/l
 | POST / PATCH / DELETE | `/api/posts[/{id}]` | unchanged |
 | GET | `/api/channels/{id}/insights` | the analysis for one channel (`ChannelInsights` in `shared/types.ts`) |
 | **GET** | **`/api/channels/{id}/feed?tz=`** | **new:** the channel's messages for the viewer (`ChannelFeed`). `source` says where they came from: `preview` (the public web preview, with views and reactions), `bot` (what the bot collected) or `workspace` (the website's own posts). Scheduled posts are always included. |
+| GET | `/api/channels/{id}/photo` | the channel's Telegram profile photo (JPEG), fetched by the bot so its token stays on the server. 404 when the channel has none or the bot hasn't seen it. Cached for an hour, with an `ETag`. |
 | **GET** | **`/api/tracked?tz=`** | **new:** the website's watchlist (`TrackedSummary[]`) |
 | **POST** | **`/api/tracked`** | **new:** `{"username": "@durov"}` (also `t.me/…` links) adds a public channel and returns it (`TrackedDetail`, 201) |
 | **GET** | **`/api/tracked/{username}?tz=`** | **new:** any public channel, watched or not: info, stats, top posts and the latest ~60 posts (`TrackedDetail`) |

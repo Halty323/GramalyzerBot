@@ -5,6 +5,7 @@ import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.jdbc.core.JdbcTemplate;
 import jakarta.servlet.http.Cookie;
@@ -20,6 +21,7 @@ import static com.halty.gramalyzerbot.workspace.Models.*;
 @AutoConfigureMockMvc
 class WorkspaceIntegrationTests {
     @Autowired MockMvc http; @Autowired WorkspaceStore store; @Autowired WorkspaceService service; @Autowired JdbcTemplate jdbc; @Autowired ObjectMapper mapper;
+    @MockitoBean TelegramGateway gateway;
     static final String AUTH="Bearer test-only-workspace-token";
     Channel channel;
     @BeforeEach void reset() {jdbc.update("DELETE FROM channel_daily_metrics"); jdbc.update("DELETE FROM workspace_posts"); jdbc.update("DELETE FROM workspace_channels"); channel=service.registerChannel(-1001234L,"Test channel","test_channel",true);}
@@ -70,6 +72,17 @@ class WorkspaceIntegrationTests {
         store.recordSubscribers(channel.id(),1200); store.recordSubscribers(channel.id(),1250);
         assertThat(service.workspace().history()).hasSize(1); assertThat(service.channel(channel.id()).subscribers()).isEqualTo(1250);
         service.channelPost(-1001234L,21,"External post",Instant.now().getEpochSecond()); service.channelPost(-1001234L,21,"External post",Instant.now().getEpochSecond()); assertThat(store.posts()).hasSize(1);
+    }
+    @Test void servesChannelPhotosThroughTheBackend() throws Exception {
+        when(gateway.photo(-1001234L)).thenReturn(new TelegramGateway.PhotoRef("photo-v1","file-1")); when(gateway.download("file-1")).thenReturn(new byte[]{(byte)0xFF,(byte)0xD8});
+        String url="/api/channels/"+channel.id()+"/photo";
+        http.perform(get(url)).andExpect(status().isUnauthorized());
+        http.perform(get(url).header("Authorization",AUTH)).andExpect(status().isOk()).andExpect(content().contentType("image/jpeg")).andExpect(header().string("ETag","\"photo-v1\"")).andExpect(header().stringValues("Cache-Control","private, max-age=3600")).andExpect(content().bytes(new byte[]{(byte)0xFF,(byte)0xD8}));
+        http.perform(get(url).header("Authorization",AUTH).header("If-None-Match","\"photo-v1\"")).andExpect(status().isNotModified());
+        Channel unlinked=store.saveChannel(new Channel("unlinked","Demo","@demo","DE","#000",0,0,0,0,"",false,"UTC",true,false,"",null));
+        http.perform(get("/api/channels/"+unlinked.id()+"/photo").header("Authorization",AUTH)).andExpect(status().isNotFound());
+        http.perform(get("/api/channels/missing/photo").header("Authorization",AUTH)).andExpect(status().isNotFound());
+        verify(gateway,times(1)).download(any());
     }
     @Test void atomicClaimsAndInterruptedRecoveryPreventBlindResends() {
         store.insert(new Post("interrupted",channel.id(),"Due","Hello","scheduled",Instant.now().minusSeconds(60),0,0,0,"Community","pending",null,null));
