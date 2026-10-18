@@ -44,7 +44,7 @@ docker compose logs -f app                              # first start: look for 
 ```
 
 * **Data:** the live database lives in the `db-data` volume; the demo's H2 files live in `demo-data`.
-* **Port:** it is bound to `127.0.0.1` only. To expose it, put a reverse proxy with HTTPS in front. Spring honours `X-Forwarded-*` headers, so the session cookie is marked `Secure` behind HTTPS.
+* **Port:** it is bound to `127.0.0.1` only. To expose it, put a reverse proxy with HTTPS in front, or use `compose.vps.yaml` (Caddy) as described in [deploy/VPS.md](deploy/VPS.md). Spring honours `X-Forwarded-*` headers, so the session cookie is marked `Secure` behind HTTPS.
 * **Updates:** `git pull` in both checkouts, then `docker compose up -d --build`. Flyway migrates the database on start.
 * **Tests:** the image build skips them (`-DskipTests`); run `mvn test` or CI before deploying.
 
