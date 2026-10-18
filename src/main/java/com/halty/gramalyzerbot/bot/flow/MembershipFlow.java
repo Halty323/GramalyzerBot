@@ -9,6 +9,8 @@ import com.halty.gramalyzerbot.channel.Channel;
 import com.halty.gramalyzerbot.channel.ChannelService;
 import com.halty.gramalyzerbot.channel.MembershipService;
 import com.halty.gramalyzerbot.common.UserFacingException;
+import com.halty.gramalyzerbot.i18n.Lang;
+import com.halty.gramalyzerbot.i18n.Tr;
 import com.halty.gramalyzerbot.user.User;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -39,9 +41,9 @@ public class MembershipFlow {
             if (ch.isEmpty() || !ch.get().isActive()) return;
             channels.markInactive(b.chatId());
             for (User u : membership.recipients(ch.get(), false)) {
-                gateway.send(u.getTelegramId(), View.of("⚠️ <b>I can no longer see " + Fmt.esc(ch.get().getTitle()) + ".</b>")
-                        .line("I was removed as an admin, so I've stopped collecting posts. Add me again to resume – your data is safe.")
-                        .row(Btn.cb("➕ How to add me", "ch:connect")));
+                gateway.send(u.getTelegramId(), Tr.in(Lang.of(u), () -> View.of(Tr.t("flow.removed_title", Fmt.esc(ch.get().getTitle())))
+                        .line(Tr.t("flow.removed_hint"))
+                        .row(Btn.cb(Tr.t("flow.removed_btn"), "ch:connect"))));
             }
         }
     }
@@ -53,7 +55,7 @@ public class MembershipFlow {
             if (known.get().isActive()) return;
             Channel back = channels.register(b.chatId(), b.title(), b.username(), null);
             for (User u : membership.recipients(back, false))
-                gateway.send(u.getTelegramId(), View.of("✅ <b>I'm back in " + Fmt.esc(back.getTitle()) + "</b> and collecting posts again."));
+                gateway.send(u.getTelegramId(), Tr.in(Lang.of(u), () -> View.of(Tr.t("flow.back_in", Fmt.esc(back.getTitle())))));
             return;
         }
         Optional<User> opt = quietOpen(b);

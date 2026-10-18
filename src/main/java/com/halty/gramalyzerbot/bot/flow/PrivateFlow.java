@@ -6,10 +6,13 @@ import com.halty.gramalyzerbot.bot.screen.*;
 import com.halty.gramalyzerbot.bot.ui.*;
 import com.halty.gramalyzerbot.channel.*;
 import com.halty.gramalyzerbot.common.UserFacingException;
+import com.halty.gramalyzerbot.i18n.Lang;
+import com.halty.gramalyzerbot.i18n.Tr;
 import com.halty.gramalyzerbot.post.DemoService;
 import com.halty.gramalyzerbot.post.ImportService;
 import com.halty.gramalyzerbot.post.PostService;
 import com.halty.gramalyzerbot.settings.BotSettings;
+import com.halty.gramalyzerbot.tracking.TrackingException;
 import com.halty.gramalyzerbot.user.User;
 import com.halty.gramalyzerbot.user.UserService;
 import com.halty.gramalyzerbot.user.UserState;
@@ -56,6 +59,7 @@ public class PrivateFlow {
     private final SettingsScreens settingsScreens;
     private final TeamScreens team;
     private final AdminScreens admin;
+    private final WatchFlow watch;
     private final DemoService demo;
     private final ImportService importer;
     private final PostService posts;
@@ -86,9 +90,11 @@ public class PrivateFlow {
             dispatch(u, m);
         } catch (UserFacingException e) {
             gateway.send(m.chatId(), View.of(e.getMessage()));
+        } catch (TrackingException e) {
+            gateway.send(m.chatId(), View.of("🤷 " + WatchScreens.error(e)));
         } catch (RuntimeException e) {
             log.error("Failed to handle a private message from {}", m.userId(), e);
-            gateway.send(m.chatId(), View.of("😵 Something went wrong on my side. Please try again in a moment."));
+            gateway.send(m.chatId(), View.of(Tr.t("flow.error")));
         }
     }
 
@@ -99,12 +105,17 @@ public class PrivateFlow {
             command(u, m, text);
             return;
         }
-        switch (text) {
-            case Menu.OVERVIEW -> { users.clearState(u); showHome(u, chat); return; }
-            case Menu.TIMES -> { users.clearState(u); withChannel(u, chat, (ch, role) -> gateway.send(chat, insights.times(ch, ch.getWindowDays(), "main"))); return; }
-            case Menu.CONTENT -> { users.clearState(u); withChannel(u, chat, (ch, role) -> gateway.send(chat, insights.content(ch, ch.getWindowDays(), "main"))); return; }
-            case Menu.SETTINGS -> { users.clearState(u); showSettings(u, chat); return; }
-            default -> { }
+        Optional<Menu.Action> button = Menu.match(text);
+        if (button.isPresent()) {
+            users.clearState(u);
+            switch (button.get()) {
+                case OVERVIEW -> showHome(u, chat);
+                case TIMES -> withChannel(u, chat, (ch, role) -> gateway.send(chat, insights.times(ch, ch.getWindowDays(), "main")));
+                case CONTENT -> withChannel(u, chat, (ch, role) -> gateway.send(chat, insights.content(ch, ch.getWindowDays(), "main")));
+                case SETTINGS -> showSettings(u, chat);
+                case WATCHLIST -> watch.showList(u, chat);
+            }
+            return;
         }
         if (m.document() != null) {
             document(u, m);
@@ -125,7 +136,11 @@ public class PrivateFlow {
             connectChannel(u, chat, "@" + text.replaceFirst("^@", ""));
             return;
         }
-        gateway.send(chat, View.of("🤔 I didn't catch that. Use the menu below, or /help to see what I can do."));
+        if (WatchFlow.looksLikeChannelLink(text)) {
+            watch.track(u, chat, text);
+            return;
+        }
+        gateway.send(chat, View.of(Tr.t("flow.didnt_catch")));
     }
 
     // ------------------------------------------------------------------ commands
@@ -142,7 +157,7 @@ public class PrivateFlow {
             case "start" -> start(u, chat, arg);
             case "menu" -> {
                 users.clearState(u);
-                gateway.sendWithKeyboard(chat, "📱 Menu ready – use the buttons below.", Menu.KEYBOARD);
+                gateway.sendWithKeyboard(chat, Tr.t("flow.menu_ready"), Menu.keyboard());
                 showHome(u, chat);
             }
             case "overview", "dashboard" -> { users.clearState(u); showHome(u, chat); }
@@ -152,6 +167,16 @@ public class PrivateFlow {
             case "settings" -> showSettings(u, chat);
             case "team" -> withChannel(u, chat, (ch, role) -> gateway.send(chat, team.home(ch, u, role)));
             case "channels" -> gateway.send(chat, start.channels(channels.forUser(u), u.getActiveChannelId(), u.isBotAdmin()));
+            case "watchlist", "watch", "tracked" -> { users.clearState(u); watch.showList(u, chat); }
+            case "track" -> {
+                if (arg.isBlank()) watch.prompt(u, chat);
+                else watch.track(u, chat, arg);
+            }
+            case "untrack" -> watch.untrack(u, chat, arg);
+            case "language", "lang" -> {
+                users.clearState(u);
+                gateway.send(chat, start.languages(Tr.lang()));
+            }
             case "connect" -> {
                 sessions.requireMayCreate(u);
                 users.setState(u, UserState.AWAIT_CONNECT, "", PROMPT_TTL);
@@ -169,14 +194,14 @@ public class PrivateFlow {
             case "help" -> gateway.send(chat, start.help(access.active(u).isPresent()));
             case "cancel" -> {
                 users.clearState(u);
-                gateway.send(chat, View.of("👌 Cancelled."));
+                gateway.send(chat, View.of(Tr.t("flow.cancelled")));
             }
             case "admin" -> {
-                if (!u.isBotAdmin()) gateway.send(chat, View.of("🤔 I don't know that command. Try /help."));
+                if (!u.isBotAdmin()) gateway.send(chat, View.of(Tr.t("flow.unknown_command")));
                 else gateway.send(chat, admin.home());
             }
             case "claim" -> claim(u, chat, arg);
-            default -> gateway.send(chat, View.of("🤔 I don't know that command. Try /help."));
+            default -> gateway.send(chat, View.of(Tr.t("flow.unknown_command")));
         }
     }
 
@@ -187,7 +212,7 @@ public class PrivateFlow {
         }
         users.clearState(u);
         if (access.active(u).isPresent()) {
-            gateway.sendWithKeyboard(chat, "👋 Welcome back, <b>" + Fmt.esc(u.displayName()) + "</b>!", Menu.KEYBOARD);
+            gateway.sendWithKeyboard(chat, Tr.t("flow.welcome_back", Fmt.esc(u.displayName())), Menu.keyboard());
             showHome(u, chat);
             return;
         }
@@ -198,11 +223,11 @@ public class PrivateFlow {
     private void sendWelcomePhoto(User u, long chat) {
         String caption = start.welcomeCaption(u);
         String cached = botSettings.get(BotSettings.WELCOME_PHOTO).orElse(null);
-        Optional<String> fileId = gateway.sendPhoto(chat, cached, PrivateFlow::welcomeImage, "welcome.jpg", caption, Menu.KEYBOARD);
+        Optional<String> fileId = gateway.sendPhoto(chat, cached, PrivateFlow::welcomeImage, "welcome.jpg", caption, Menu.keyboard());
         if (fileId.isPresent()) {
             if (!fileId.get().equals(cached)) botSettings.set(BotSettings.WELCOME_PHOTO, fileId.get());
         } else {
-            gateway.sendWithKeyboard(chat, caption, Menu.KEYBOARD);
+            gateway.sendWithKeyboard(chat, caption, Menu.keyboard());
         }
     }
 
@@ -216,19 +241,19 @@ public class PrivateFlow {
 
     private void claim(User u, long chat, String code) {
         if (users.anyBotAdmin() || !claimCode.equals(code)) {
-            gateway.send(chat, View.of("🤔 I don't know that command. Try /help."));
+            gateway.send(chat, View.of(Tr.t("flow.unknown_command")));
             return;
         }
         users.makeBotAdmin(u);
-        gateway.send(chat, View.of("🛠 <b>You're now the bot admin.</b> Open /admin any time."));
+        gateway.send(chat, View.of(Tr.t("flow.claimed")));
     }
 
     private void joinViaInvite(User u, long chat, String token) {
         MembershipService.Joined j = membership.accept(token, u);
         users.setActiveChannel(u, j.channel().getId());
         gateway.sendWithKeyboard(chat, j.alreadyMember()
-                ? "👋 You're already on the team for <b>" + Fmt.esc(j.channel().getTitle()) + "</b>."
-                : "🎉 <b>You joined " + Fmt.esc(j.channel().getTitle()) + "</b> as " + j.role().badge() + ".", Menu.KEYBOARD);
+                ? Tr.t("flow.already_member", Fmt.esc(j.channel().getTitle()))
+                : Tr.t("flow.joined", Fmt.esc(j.channel().getTitle()), Labels.badge(j.role())), Menu.keyboard());
         gateway.send(chat, home.render(j.channel(), j.role()));
     }
 
@@ -246,7 +271,7 @@ public class PrivateFlow {
             if (role.can(Permission.CHANGE_SETTINGS)) {
                 gateway.send(chat, settingsScreens.home(ch, role));
             } else {
-                gateway.send(chat, View.of("🔒 Channel settings are for admins. Here are your own notification settings:"));
+                gateway.send(chat, View.of(Tr.t("flow.settings_admins")));
                 membership.membership(ch, u).ifPresent(m -> gateway.send(chat, settingsScreens.notifications(ch, m)));
             }
         });
@@ -256,14 +281,14 @@ public class PrivateFlow {
         gateway.typing(chat);
         Channel ch = demo.createFor(u);
         users.setActiveChannel(u, ch.getId());
-        gateway.send(chat, View.of("🎮 <b>Sample channel ready.</b> It's fake data with realistic patterns – explore freely."));
+        gateway.send(chat, View.of(Tr.t("flow.demo_ready")));
         gateway.send(chat, home.render(ch, Role.OWNER));
     }
 
     private void withChannel(User u, long chat, BiConsumer<Channel, Role> action) {
         Optional<Channel> ch = access.active(u);
         if (ch.isEmpty()) {
-            View v = View.of("📭 You haven't connected a channel yet.");
+            View v = View.of(Tr.t("flow.no_channel"));
             v.rows(start.welcome().rows());
             gateway.send(chat, v);
             return;
@@ -280,14 +305,15 @@ public class PrivateFlow {
             case UserState.AWAIT_CONNECT -> {
                 java.util.regex.Matcher hm = HANDLE.matcher(text);
                 if (hm.matches()) connectChannel(u, chat, "@" + hm.group(1));
-                else gateway.send(chat, View.of("Send the channel's <code>@username</code>, or forward me any post from it. /cancel to stop."));
+                else gateway.send(chat, View.of(Tr.t("flow.send_username")));
             }
+            case UserState.AWAIT_TRACK -> watch.track(u, chat, text);
             case UserState.AWAIT_TOPIC -> topicInput(u, chat, p.arg(), text);
             case UserState.AWAIT_BAN -> banInput(u, chat, text);
-            case UserState.AWAIT_IMPORT -> gateway.send(chat, View.of("📎 Please send the <code>result.json</code> file as a document. /cancel to stop."));
+            case UserState.AWAIT_IMPORT -> gateway.send(chat, View.of(Tr.t("flow.send_file")));
             default -> {
                 users.clearState(u);
-                gateway.send(chat, View.of("🤔 I didn't catch that. Use the menu below, or /help."));
+                gateway.send(chat, View.of(Tr.t("flow.didnt_catch_short")));
             }
         }
     }
@@ -296,7 +322,7 @@ public class PrivateFlow {
         Channel ch = access.require(u, channelId, Permission.CHANGE_SETTINGS);
         List<ZoneId> zones = TimeZones.resolve(text);
         if (zones.isEmpty()) {
-            gateway.send(chat, View.of("🤷 I couldn't find <b>" + Fmt.esc(Fmt.trunc(text, 40)) + "</b>. Try a big city nearby (<code>Berlin</code>) or an offset like <code>UTC+2</code>."));
+            gateway.send(chat, View.of(Tr.t("flow.tz_unknown", Fmt.esc(Fmt.trunc(text, 40)))));
             return;
         }
         if (zones.size() > 1) {
@@ -305,7 +331,7 @@ public class PrivateFlow {
         }
         Channel saved = settingsService.setTimezone(ch, u, zones.get(0));
         users.clearState(u);
-        gateway.send(chat, View.of("✅ Timezone set to <b>" + Fmt.esc(TimeZones.label(zones.get(0), java.time.Instant.now())) + "</b>."));
+        gateway.send(chat, View.of(Tr.t("flow.tz_set", Fmt.esc(TimeZones.label(zones.get(0), java.time.Instant.now())))));
         gateway.send(chat, settingsScreens.home(saved, access.roleOf(u, saved)));
     }
 
@@ -316,7 +342,7 @@ public class PrivateFlow {
         posts.setTopic(ch, Long.parseLong(ids[1]), clear ? "" : text);
         audit.record(ch.getId(), u.getId(), "post.tag", clear ? "Cleared a post's topic" : "Tagged a post #" + Fmt.trunc(text, 40));
         users.clearState(u);
-        gateway.send(chat, View.of(clear ? "✅ Topic cleared." : "✅ Topic saved."));
+        gateway.send(chat, View.of(Tr.t(clear ? "flow.topic_cleared" : "flow.topic_saved")));
         gateway.send(chat, insights.top(ch, access.roleOf(u, ch), 0));
     }
 
@@ -329,18 +355,18 @@ public class PrivateFlow {
         try {
             id = Long.parseLong(text.trim());
         } catch (NumberFormatException e) {
-            gateway.send(chat, View.of("That doesn't look like a numeric Telegram ID. Try again or /cancel."));
+            gateway.send(chat, View.of(Tr.t("flow.ban_not_number")));
             return;
         }
         Optional<User> existing = users.findByTelegramId(id);
         if (existing.isPresent() && existing.get().isBotAdmin()) {
             users.clearState(u);
-            gateway.send(chat, View.of("Bot admins can't be banned."));
+            gateway.send(chat, View.of(Tr.t("flow.ban_admin")));
             return;
         }
         Optional<User> target = users.setBanned(id, true);
         users.clearState(u);
-        gateway.send(chat, target.map(admin::user).orElse(View.of("I don't know anyone with that ID.")));
+        gateway.send(chat, target.map(admin::user).orElse(View.of(Tr.t("flow.ban_unknown"))));
     }
 
     // ------------------------------------------------------------------ connecting a channel by name or forward
@@ -349,24 +375,31 @@ public class PrivateFlow {
         gateway.typing(chat);
         Optional<BotApi.ChatInfo> info = ref.startsWith("@") ? gateway.chat(ref) : gateway.chat(Long.parseLong(ref));
         if (info.isEmpty()) {
-            gateway.send(chat, View.of("🤷 I can't find that channel. Check the spelling, and make sure I've been added as an admin."));
+            if (ref.startsWith("@")) watch.track(u, chat, ref); // not a channel the bot is in: maybe it's someone else's public channel
+            else gateway.send(chat, View.of(Tr.t("flow.cant_find")));
             return;
         }
         BotApi.ChatInfo c = info.get();
         if (!"channel".equals(c.type())) {
-            gateway.send(chat, View.of("That's not a channel (it's a " + Fmt.esc(c.type()) + "). I analyse channels."));
+            gateway.send(chat, View.of(Tr.t("flow.not_a_channel", Fmt.esc(c.type()))));
             return;
         }
         Optional<String> botStatus = gateway.memberStatus(c.id(), gateway.botId());
         if (botStatus.isEmpty() || !"administrator".equals(botStatus.get())) {
-            View v = View.of("⚠️ I'm not an admin of <b>" + Fmt.esc(c.title()) + "</b> yet. Add me first, then try again.");
-            v.row(Btn.link("➕ Add me to a channel", "https://t.me/" + gateway.botUsername() + "?startchannel=true"));
+            View v = View.of(Tr.t("flow.not_admin_yet", Fmt.esc(c.title())));
+            v.row(Btn.link(Tr.t("btn.add_to_channel"), "https://t.me/" + gateway.botUsername() + "?startchannel=true"));
+            if (c.username() != null) {
+                v.line(Tr.t("watch.not_admin_track"));
+                v.row(Btn.cb(Tr.t("watch.btn.just_track"), Cb.of("wl:addu", c.username())));
+            }
             gateway.send(chat, v);
             return;
         }
         Optional<String> userStatus = gateway.memberStatus(c.id(), u.getTelegramId());
         if (userStatus.isEmpty() || !(userStatus.get().equals("creator") || userStatus.get().equals("administrator"))) {
-            gateway.send(chat, View.of("🔒 Only admins of <b>" + Fmt.esc(c.title()) + "</b> can connect it."));
+            View v = View.of(Tr.t("flow.only_admins", Fmt.esc(c.title())));
+            if (c.username() != null) v.row(Btn.cb(Tr.t("watch.btn.just_track"), Cb.of("wl:addu", c.username())));
+            gateway.send(chat, v);
             return;
         }
         connector.connect(u, c.id(), c.title(), c.username());
@@ -378,38 +411,42 @@ public class PrivateFlow {
         long chat = m.chatId();
         Optional<UserService.Pending> p = users.pending(u);
         if (p.isEmpty() || !UserState.AWAIT_IMPORT.equals(p.get().state())) {
-            gateway.send(chat, View.of("📎 To import history, open /import first so I know which channel the file belongs to."));
+            gateway.send(chat, View.of(Tr.t("flow.import_first")));
             return;
         }
         Channel ch = access.require(u, Long.parseLong(p.get().arg()), Permission.IMPORT_DATA);
         Events.DocumentInfo doc = m.document();
         if (doc.size() > MAX_IMPORT_BYTES) {
-            gateway.send(chat, View.of("📦 That file is over 20 MB, which is the most Telegram lets bots download. Export a shorter date range and try again."));
+            gateway.send(chat, View.of(Tr.t("flow.import_too_big")));
             return;
         }
         if (doc.name() != null && !doc.name().toLowerCase(Locale.ROOT).endsWith(".json")) {
-            gateway.send(chat, View.of("That doesn't look like JSON. In Telegram Desktop choose format <b>JSON</b> and send <code>result.json</code>."));
+            gateway.send(chat, View.of(Tr.t("flow.import_not_json")));
             return;
         }
         users.clearState(u);
-        gateway.send(chat, View.of("⏳ Importing… I'll message you when it's done."));
-        worker.submit(() -> runImport(u, chat, ch, doc));
+        gateway.send(chat, View.of(Tr.t("flow.importing")));
+        Lang lang = Tr.lang();
+        worker.submit(() -> {
+            Tr.use(lang);
+            runImport(u, chat, ch, doc);
+        });
     }
 
     private void runImport(User u, long chat, Channel ch, Events.DocumentInfo doc) {
         try (InputStream in = gateway.download(doc.fileId())) {
             ImportService.Result r = importer.importExport(ch, u, in);
-            gateway.send(chat, View.of("✅ <b>Imported " + Fmt.num(r.total()) + " posts</b> (" + Fmt.num(r.created()) + " new, " + Fmt.num(r.updated()) + " merged with ones I already had).")
-                    .line("Posts younger than a day are skipped in the analysis until their reactions settle.")
-                    .row(Btn.cb("📊 Open dashboard", Cb.of("nav:home", ch.getId()))));
+            gateway.send(chat, View.of(Tr.t("flow.imported", Fmt.num(r.total()), Fmt.num(r.created()), Fmt.num(r.updated())))
+                    .line(Tr.t("flow.imported_hint"))
+                    .row(Btn.cb(Tr.t("btn.open_dashboard"), Cb.of("nav:home", ch.getId()))));
         } catch (UserFacingException e) {
             gateway.send(chat, View.of("⚠️ " + e.getMessage()));
         } catch (IOException e) {
             log.warn("Import failed", e);
-            gateway.send(chat, View.of("⚠️ I couldn't read that file: " + Fmt.esc(String.valueOf(e.getMessage()))));
+            gateway.send(chat, View.of(Tr.t("flow.import_unreadable", Fmt.esc(String.valueOf(e.getMessage())))));
         } catch (RuntimeException e) {
             log.error("Import crashed", e);
-            gateway.send(chat, View.of("😵 The import failed unexpectedly. Nothing was lost – please try again."));
+            gateway.send(chat, View.of(Tr.t("flow.import_crashed")));
         }
     }
 

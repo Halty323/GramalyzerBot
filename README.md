@@ -6,7 +6,9 @@ The shared Java 21 / Spring Boot backend behind the Gramalyzer admin website ([G
 |---|---|---|
 | **CRM workspace** | `workspace` | The website's internal REST API (`/api`): channels, the text-post queue, the delivery worker, observed subscriber history, demo data. |
 | **Channel analytics** | `analytics`, `bot`, `channel`, `post`, `user`, `settings`, `scheduler` | The Telegram bot: works out **when to post** and **what to write about**, configured entirely in Telegram DMs, with Owner / Admin / Moderator roles, invites, weekly digests and "good time to post" nudges. |
-| **Bridge** | `crm` | Keeps the two in step and serves the analysis to the website (`GET /api/channels/{id}/insights`). |
+| **Bridge** | `crm` | Keeps the two in step and serves the analysis and the channel viewer's feed to the website (`GET /api/channels/{id}/insights`, `/feed`). |
+| **Public channel tracking** | `tracking` | Watchlists of public channels nobody had to add the bot to, for both the website and the bot: subscribers, average views, engagement rate, posting rhythm, top posts and subscriber history, read from Telegram's public web preview. |
+| **Languages** | `i18n` | The bot speaks English, Russian, Ukrainian, Hindi, Indonesian, Portuguese, Spanish, Arabic, Persian, Uzbek, Turkish and Vietnamese. |
 
 ## Run it
 
@@ -68,6 +70,9 @@ It is also left out of Docker images, so containers are configured only through 
 | `BOT_PUBLIC_REGISTRATION` | – | `true` (default): anyone may connect a channel; can be switched later in `/admin` |
 | `BOT_DEFAULT_TIMEZONE` | – | Timezone for newly connected channels until someone sets one (default `UTC`) |
 | `SPRING_DATASOURCE_URL` / `_USERNAME` / `_PASSWORD` | – | PostgreSQL in production. The default is a local H2 file. |
+| `TRACKING_REFRESH_ENABLED` | – | `true` (default): refresh watched public channels in the background. Switch it off where `t.me` can't be reached. |
+| `TRACKING_REFRESH_EVERY` | – | How often each watched public channel is fetched again (default `PT2H`). Every visit adds that day to its subscriber history. |
+| `TRACKING_MAX_PER_PERSON` / `TRACKING_MAX_WEB` | – | Watchlist sizes: per person in the bot (default 20) and for the website (default 100) |
 
 Then add the bot to your channel as an admin. To let the website's queue publish, give the bot **Post messages**. For comment counts, also add it to the linked discussion group. Open the bot in a private chat and tap **Connect my channel**, or just add it: the person who adds it becomes the channel's Owner in the bot.
 
@@ -91,7 +96,15 @@ All under `/api`, with the same auth as before (session cookie from `POST /api/l
 | GET | `/api/workspace` | unchanged |
 | PATCH | `/api/channels/{id}` | unchanged. A `timezone` change now also reaches the bot. |
 | POST / PATCH / DELETE | `/api/posts[/{id}]` | unchanged |
-| **GET** | **`/api/channels/{id}/insights`** | **new:** the analysis for one channel (`ChannelInsights` in `shared/types.ts`) |
+| GET | `/api/channels/{id}/insights` | the analysis for one channel (`ChannelInsights` in `shared/types.ts`) |
+| **GET** | **`/api/channels/{id}/feed?tz=`** | **new:** the channel's messages for the viewer (`ChannelFeed`). `source` says where they came from: `preview` (the public web preview, with views and reactions), `bot` (what the bot collected) or `workspace` (the website's own posts). Scheduled posts are always included. |
+| **GET** | **`/api/tracked?tz=`** | **new:** the website's watchlist (`TrackedSummary[]`) |
+| **POST** | **`/api/tracked`** | **new:** `{"username": "@durov"}` (also `t.me/…` links) adds a public channel and returns it (`TrackedDetail`, 201) |
+| **GET** | **`/api/tracked/{username}?tz=`** | **new:** any public channel, watched or not: info, stats, top posts and the latest ~60 posts (`TrackedDetail`) |
+| **POST** | **`/api/tracked/{username}/refresh`** | **new:** fetch it again now |
+| **DELETE** | **`/api/tracked/{username}`** | **new:** remove it from the watchlist (204) |
+
+`tz` is an IANA zone (`Europe/Kyiv`) for the posting-hours histogram; UTC by default. Tracking errors also carry a `code` (`invalid_username`, `private_link`, `not_found`, `not_channel`, `unreachable`, `limit`, `not_tracked`) that the website translates.
 
 `status` is `ready`, `learning` or `not_connected`:
 
@@ -107,6 +120,20 @@ When `ready`, the response also has:
 
 "Lift" is a multiplier of the channel's typical engagement.
 
+## Public channel tracking
+
+Anyone can keep an eye on a public channel without being its admin and without adding the bot: on the website (Channel viewer, Watchlist) or in the bot (`/track @username`, `/watchlist`, the 🔭 button, or just pasting a `t.me` link).
+
+* **Where the numbers come from.** Telegram's public web preview (`t.me/s/<username>`) shows anyone a channel's title, description, subscriber count, media counters and its last ~20 posts with view counts and reactions. The first lookup also reads one older page. When the bot is running, `getChat` and `getChatMemberCount` fill in the exact subscriber count. Channels that hide their preview still show their size; posts and views stay empty.
+* **History builds up over time.** Each refresh (every 2 hours while somebody watches the channel) updates the posts still on the preview and stores that day's subscribers and average views, so growth charts start from the day a channel is first watched.
+* **Shared fetches.** A channel watched from the website and by several people in the bot is fetched once. Channels somebody only looked at are forgotten after 3 days.
+* **What's computed:** average views of posts older than 12 h, ER (views ÷ subscribers), reactions per 100 views, posts per day, format mix, hashtags, busiest hours and weekdays, top posts, and 7/30-day subscriber change.
+* In the demo profile, three made-up channels are on the website's watchlist so the viewer works without reaching Telegram.
+
+## Languages
+
+The bot picks the language from the person's choice (🌐 Language, `/language`), then from their Telegram app's language, then English. Texts live in `src/main/resources/i18n/bot_<code>.properties`: Telegram HTML with `{0}` placeholders, plus plural forms per language (`.one`, `.few`, `.many`…). `I18nTest` checks that every language has every key with the same placeholders and HTML. The command menu is published in each language. To add a language, add it to `i18n.Lang` and copy `bot_en.properties`.
+
 ## What the analysis can and can't see
 
 * **Telegram does not give bots view counts.** "Engagement" therefore means reactions + 3 × comments (switchable to reactions or comments only in the bot). Comments need the discussion group linked and the bot in it.
@@ -117,7 +144,9 @@ When `ready`, the response also has:
 
 ```
 workspace/   CRM REST API, queue, delivery worker, demo workspace       (was here before)
-crm/         bridge between the two + the insights endpoint
+crm/         bridge between the two + the insights and feed endpoints
+tracking/    public channel watchlists: preview parser and client, stats, REST API, refresh jobs
+i18n/        the bot's languages (Lang, Tr, plural rules); texts in resources/i18n
 analytics/   pure Java: engine, report, text features, scheduling rules (unit-tested)
 bot/         TelegramBot, BotRegistration, UpdateMapper/Router, BotApi (all Telegram calls)
 bot/ui, bot/screen, bot/flow   the bot's screens and conversations
@@ -129,6 +158,7 @@ Telegram library types appear only in `BotApi`, `UpdateMapper`, `TelegramBot`, `
 ## Notes
 
 * **The original source archive contained a hard-coded bot token. Revoke it in @BotFather** and use a new one via `TELEGRAM_BOT_TOKEN`. The old token remains in the archive and git history.
+* Migration `V4__tracking.sql` adds the tracking tables and `users.language`.
 * Migration `V3__channel_analytics.sql` adds the analytics tables and extends `users`. It is written to run on both PostgreSQL and H2 (one `ADD COLUMN` per statement; no `TEXT` columns, which H2 maps to CLOB).
 * The sample `/random` command and its "Get random number" keyboard were removed; `/start` now opens the analytics bot's welcome screen.
 * Lombok is declared as an annotation processor (needed on JDK 23+). After pulling, run `mvn clean test`.

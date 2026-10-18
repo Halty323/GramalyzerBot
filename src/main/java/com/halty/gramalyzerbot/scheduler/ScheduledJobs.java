@@ -13,6 +13,8 @@ import com.halty.gramalyzerbot.channel.Channel;
 import com.halty.gramalyzerbot.channel.ChannelService;
 import com.halty.gramalyzerbot.channel.MembershipService;
 import com.halty.gramalyzerbot.channel.SubscriberService;
+import com.halty.gramalyzerbot.i18n.Lang;
+import com.halty.gramalyzerbot.i18n.Tr;
 import com.halty.gramalyzerbot.post.AnalysisService;
 import com.halty.gramalyzerbot.post.Post;
 import com.halty.gramalyzerbot.post.PostService;
@@ -25,7 +27,9 @@ import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.time.ZonedDateTime;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -77,9 +81,11 @@ public class ScheduledJobs {
         ch.setLastDigestAt(now); // mark first so a slow send can never double-fire
         ch = channels.save(ch);
         if (posts.latest(ch).isEmpty()) return;
-        View view = digests.build(ch);
+        Channel channel = ch;
+        Map<Lang, View> byLang = new EnumMap<>(Lang.class);
         for (User u : membership.recipients(ch, false)) {
-            gateway.send(u.getTelegramId(), view);
+            Lang lang = Lang.of(u);
+            gateway.send(u.getTelegramId(), byLang.computeIfAbsent(lang, l -> Tr.in(l, () -> digests.build(channel))));
             pause();
         }
     }
@@ -97,11 +103,13 @@ public class ScheduledJobs {
         ch.setLastNudgeAt(now);
         ch = channels.save(ch);
         Report.Slot slot = due.get();
-        View v = View.of("⏰ <b>Good time to post!</b>")
-                .line("<b>" + Fmt.esc(ch.getTitle()) + "</b>: " + Labels.slot(slot) + " is one of your best slots (" + Fmt.lift(slot.lift()) + " typical engagement).")
-                .line("Last post: " + (lastPost == null ? "none yet" : Fmt.ago(lastPost, now)) + ".")
-                .row(Btn.cb("💡 What to write", Cb.of("nav:content", ch.getId(), ch.getWindowDays(), "main")));
+        Channel channel = ch;
+        Map<Lang, View> byLang = new EnumMap<>(Lang.class);
         for (User u : recipients) {
+            View v = byLang.computeIfAbsent(Lang.of(u), l -> Tr.in(l, () -> View.of(Tr.t("nudge.title"))
+                    .line(Tr.t("nudge.slot", Fmt.esc(channel.getTitle()), Labels.slot(slot), Fmt.lift(slot.lift())))
+                    .line(Tr.t("nudge.last", lastPost == null ? Tr.t("home.none_yet") : Fmt.ago(lastPost, now)))
+                    .row(Btn.cb(Tr.t("btn.content"), Cb.of("nav:content", channel.getId(), channel.getWindowDays(), "main")))));
             gateway.send(u.getTelegramId(), v);
             pause();
         }

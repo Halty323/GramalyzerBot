@@ -162,7 +162,7 @@ public class PostService {
 
     public Post getFor(Channel ch, long postId) {
         return posts.findById(postId).filter(p -> p.getChannelId().equals(ch.getId()))
-                .orElseThrow(() -> new UserFacingException("I can't find that post any more."));
+                .orElseThrow(() -> new UserFacingException("err.post_gone"));
     }
 
     /** Returns the new "excluded" state. */
@@ -180,9 +180,9 @@ public class PostService {
     public void setTopic(Channel ch, long postId, String topic) {
         Post p = getFor(ch, postId);
         String clean = topic == null ? "" : topic.trim().replaceFirst("^#", "").toLowerCase(Locale.ROOT);
-        if (clean.length() > 40) throw new UserFacingException("Keep topics short (40 characters max).");
+        if (clean.length() > 40) throw new UserFacingException("err.topic_long");
         if (!clean.isEmpty() && !clean.matches("[\\p{L}\\p{N}_ -]+"))
-            throw new UserFacingException("Topics can use letters, numbers, spaces, '-' and '_'.");
+            throw new UserFacingException("err.topic_chars");
         p.setManualTopic(clean.isEmpty() ? null : clean.replace(' ', '_'));
         posts.save(p);
         analysis.invalidate(ch.getId());

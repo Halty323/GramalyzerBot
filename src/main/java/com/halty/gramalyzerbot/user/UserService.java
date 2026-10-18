@@ -33,7 +33,7 @@ public class UserService {
         });
         u.setUsername(username);
         u.setFirstName(firstName);
-        u.setLanguageCode(languageCode);
+        if (languageCode != null) u.setLanguageCode(languageCode); // updates without a sender language (e.g. being added to a channel) keep the last one
         u.setLastSeenAt(Instant.now());
         if (props.isAdmin(telegramId, username)) u.setBotAdmin(true);
         return users.save(u);
@@ -69,6 +69,13 @@ public class UserService {
     @Transactional
     public void setActiveChannel(User u, Long channelId) {
         u.setActiveChannelId(channelId);
+        users.save(u);
+    }
+
+    /** @param code a supported language code, or null to follow the Telegram app's language again */
+    @Transactional
+    public void setLanguage(User u, String code) {
+        u.setLanguage(code);
         users.save(u);
     }
 

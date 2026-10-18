@@ -2,6 +2,7 @@ package com.halty.gramalyzerbot.bot.screen;
 
 import com.halty.gramalyzerbot.analytics.Report;
 import com.halty.gramalyzerbot.analytics.Sample;
+import com.halty.gramalyzerbot.i18n.Tr;
 import com.halty.gramalyzerbot.bot.ui.*;
 import com.halty.gramalyzerbot.channel.Channel;
 import com.halty.gramalyzerbot.channel.Links;
@@ -35,32 +36,32 @@ public class DigestBuilder {
         Week cur = week(thisWeek), prev = week(prevWeek);
 
         View v = new View();
-        v.line("📬 <b>Weekly digest</b> · " + Fmt.esc(ch.getTitle()));
+        v.line(Tr.t("digest.title", Fmt.esc(ch.getTitle())));
         v.line(Fmt.rule());
         if (cur.posts() == 0) {
-            v.line("📝 No posts in the last 7 days.");
+            v.line(Tr.t("digest.no_posts"));
         } else {
-            v.line("📝 Posts: <b>" + cur.posts() + "</b>" + trend(cur.posts(), prev.posts()));
-            v.line("❤️ Reactions: <b>" + Fmt.num(cur.reactions()) + "</b>" + trend(cur.reactions(), prev.reactions()));
+            v.line(Tr.t("digest.posts", cur.posts()) + trend(cur.posts(), prev.posts()));
+            v.line(Tr.t("digest.reactions", Fmt.num(cur.reactions())) + trend(cur.reactions(), prev.reactions()));
             if (cur.comments() > 0 || prev.comments() > 0)
-                v.line("💭 Comments: <b>" + Fmt.num(cur.comments()) + "</b>" + trend(cur.comments(), prev.comments()));
+                v.line(Tr.t("digest.comments", Fmt.num(cur.comments())) + trend(cur.comments(), prev.comments()));
             Optional<Sample> best = thisWeek.stream().max(Comparator.comparingInt(s -> s.reactions() + 3 * s.comments()));
             best.ifPresent(b -> {
-                v.line("🏆 Best post: <b>" + Fmt.esc(Fmt.trunc(b.text().isEmpty() ? Labels.kind(b.kind().name()) : b.text(), 60)) + "</b> · ❤ " + b.reactions());
+                v.line(Tr.t("digest.best", Fmt.esc(Fmt.trunc(b.text().isEmpty() ? Labels.kind(b.kind().name()) : b.text(), 60))) + " · ❤ " + b.reactions());
                 String url = Links.post(ch.getTelegramChatId(), ch.getUsername(), ch.isDemo(), b.messageId());
-                if (url != null) v.row(Btn.link("↗ Open best post", url));
+                if (url != null) v.row(Btn.link(Tr.t("digest.btn.best"), url));
             });
         }
         SubscriberService.Growth g = subscribers.growth(ch, 7);
-        if (g.current() != null) v.line("👥 Subscribers: <b>" + Fmt.num(g.current()) + "</b>" + (g.change() == null ? "" : " (" + Fmt.signed(g.change()) + " this week)"));
+        if (g.current() != null) v.line(Tr.t("digest.subscribers", Fmt.num(g.current())) + (g.change() == null ? "" : " (" + Tr.t("digest.this_week", Fmt.signed(g.change())) + ")"));
 
         List<String> play = Playbook.lines(analysis.report(ch));
         if (!play.isEmpty()) {
             v.blank();
-            v.line("<b>🎯 Next week, aim for</b>");
+            v.line(Tr.t("digest.aim"));
             v.line("<blockquote>" + String.join("\n", play) + "</blockquote>");
         }
-        v.row(Btn.cb("📊 Open dashboard", Cb.of("nav:home", ch.getId())));
+        v.row(Btn.cb(Tr.t("btn.open_dashboard"), Cb.of("nav:home", ch.getId())));
         return v;
     }
 

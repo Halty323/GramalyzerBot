@@ -32,13 +32,12 @@ public class ImportService {
     }
 
     public Result importExport(Channel ch, User actor, InputStream in) throws IOException {
-        if (ch.isDemo()) throw new UserFacingException("Importing is for real channels – the demo already has history.");
+        if (ch.isDemo()) throw new UserFacingException("err.import_demo");
         List<ExportParser.ExportedPost> parsed = new ArrayList<>();
         ExportParser.Header header = ExportParser.parse(in, parsed::add);
         verify(ch, header);
         if (parsed.isEmpty())
-            throw new UserFacingException("I couldn't find any posts in that file. Export the channel history as <b>JSON</b> "
-                    + "(not HTML) from Telegram Desktop and send <code>result.json</code>.");
+            throw new UserFacingException("err.import_empty");
 
         int created = 0, updated = 0;
         for (int i = 0; i < parsed.size(); i += CHUNK) {
@@ -55,12 +54,12 @@ public class ImportService {
 
     private static void verify(Channel ch, ExportParser.Header h) {
         if (h.type() != null && !h.type().contains("channel"))
-            throw new UserFacingException("That export isn't from a channel (it says “" + Fmt.esc(h.type()) + "”).");
+            throw new UserFacingException("err.import_not_channel", Fmt.esc(h.type()));
         if (h.id() != null) {
             long a = Math.abs(ch.getTelegramChatId());
             if (h.id() != a && h.id() != a - CHANNEL_BASE)
-                throw new UserFacingException("That export is from a different channel" +
-                        (h.name() == null ? "" : " (“" + Fmt.esc(h.name()) + "”)") + ". I only import into the channel you're managing.");
+                throw (h.name() == null ? new UserFacingException("err.import_other_channel")
+                        : new UserFacingException("err.import_other_named", Fmt.esc(h.name())));
         }
     }
 }

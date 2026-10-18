@@ -37,8 +37,8 @@ public class MembershipService {
     }
 
     public Role require(Channel ch, User u, Permission p) {
-        Role r = roleOf(ch, u).orElseThrow(() -> new UserFacingException("🔒 You don't have access to this channel."));
-        if (!r.can(p)) throw new UserFacingException("🔒 This needs the " + p.minimum().label() + " role.");
+        Role r = roleOf(ch, u).orElseThrow(() -> new UserFacingException("err.no_access"));
+        if (!r.can(p)) throw new UserFacingException("err.needs_role", p.minimum());
         return r;
     }
 
@@ -70,7 +70,7 @@ public class MembershipService {
         if (existing.isPresent()) return existing.get().getRole();
         boolean hasOwner = members.findAllByChannelId(ch.getId()).stream().anyMatch(m -> m.getRole() == Role.OWNER);
         if (hasOwner)
-            throw new UserFacingException("This channel is already managed by someone else here. Ask its owner for an invite link.");
+            throw new UserFacingException("err.already_managed");
         members.save(new ChannelMember(ch.getId(), u.getId(), Role.OWNER, null));
         audit.record(ch.getId(), u.getId(), "channel.connect", u.displayName() + " connected the channel");
         return Role.OWNER;
@@ -94,9 +94,9 @@ public class MembershipService {
     public void changeRole(Channel ch, User actor, long targetUserId, Role newRole) {
         Role actorRole = require(ch, actor, Permission.INVITE_MODERATORS);
         ChannelMember target = members.findByChannelIdAndUserId(ch.getId(), targetUserId)
-                .orElseThrow(() -> new UserFacingException("That person is no longer on the team."));
+                .orElseThrow(() -> new UserFacingException("err.person_gone"));
         if (!TeamRules.canChangeRole(actorRole, target.getRole(), newRole))
-            throw new UserFacingException("🔒 You can't change that role.");
+            throw new UserFacingException("err.cant_change_role");
         Role old = target.getRole();
         target.setRole(newRole);
         members.save(target);
@@ -108,9 +108,9 @@ public class MembershipService {
     public void remove(Channel ch, User actor, long targetUserId) {
         Role actorRole = require(ch, actor, Permission.INVITE_MODERATORS);
         ChannelMember target = members.findByChannelIdAndUserId(ch.getId(), targetUserId)
-                .orElseThrow(() -> new UserFacingException("That person is no longer on the team."));
+                .orElseThrow(() -> new UserFacingException("err.person_gone"));
         if (!TeamRules.canRemove(actorRole, target.getRole()))
-            throw new UserFacingException("🔒 You can't remove that person.");
+            throw new UserFacingException("err.cant_remove");
         members.delete(target);
         audit.record(ch.getId(), actor.getId(), "member.remove", nameOf(targetUserId) + " (" + target.getRole().label() + ")");
     }
@@ -118,9 +118,9 @@ public class MembershipService {
     @Transactional
     public void leave(Channel ch, User u) {
         ChannelMember m = members.findByChannelIdAndUserId(ch.getId(), u.getId())
-                .orElseThrow(() -> new UserFacingException("You're not on this team."));
+                .orElseThrow(() -> new UserFacingException("err.not_on_team"));
         if (m.getRole() == Role.OWNER)
-            throw new UserFacingException("Owners can't leave. Disconnect the channel from Settings instead.");
+            throw new UserFacingException("err.owner_cant_leave");
         members.delete(m);
         audit.record(ch.getId(), u.getId(), "member.leave", u.displayName() + " left the team");
         if (Objects.equals(u.getActiveChannelId(), ch.getId())) {
@@ -132,7 +132,7 @@ public class MembershipService {
     @Transactional
     public Invite createInvite(Channel ch, User actor, Role role) {
         Role actorRole = require(ch, actor, Permission.INVITE_MODERATORS);
-        if (!TeamRules.canInvite(actorRole, role)) throw new UserFacingException("🔒 You can't invite " + role.label() + "s.");
+        if (!TeamRules.canInvite(actorRole, role)) throw new UserFacingException("err.cant_invite", role);
         Invite inv = new Invite();
         inv.setToken(randomToken(20));
         inv.setChannelId(ch.getId());
@@ -163,11 +163,11 @@ public class MembershipService {
 
     @Transactional
     public Joined accept(String token, User user) {
-        Invite inv = invites.findByToken(token).orElseThrow(() -> new UserFacingException("That invite link isn't valid."));
-        Channel ch = channels.findById(inv.getChannelId()).orElseThrow(() -> new UserFacingException("That channel no longer exists."));
+        Invite inv = invites.findByToken(token).orElseThrow(() -> new UserFacingException("err.invite_invalid"));
+        Channel ch = channels.findById(inv.getChannelId()).orElseThrow(() -> new UserFacingException("err.channel_gone"));
         Optional<ChannelMember> existing = members.findByChannelIdAndUserId(ch.getId(), user.getId());
         if (existing.isPresent()) return new Joined(ch, existing.get().getRole(), true);
-        if (!inv.usable(Instant.now())) throw new UserFacingException("That invite link has expired or was already used. Ask for a new one.");
+        if (!inv.usable(Instant.now())) throw new UserFacingException("err.invite_expired");
         inv.setUses(inv.getUses() + 1);
         invites.save(inv);
         members.save(new ChannelMember(ch.getId(), user.getId(), inv.getRole(), inv.getCreatedBy()));
@@ -178,7 +178,7 @@ public class MembershipService {
     @Transactional
     public void setNotify(Channel ch, User u, Boolean digest, Boolean nudges) {
         ChannelMember m = members.findByChannelIdAndUserId(ch.getId(), u.getId())
-                .orElseThrow(() -> new UserFacingException("Join the team first to set notifications."));
+                .orElseThrow(() -> new UserFacingException("err.join_first"));
         if (digest != null) m.setNotifyDigest(digest);
         if (nudges != null) m.setNotifyNudges(nudges);
         members.save(m);

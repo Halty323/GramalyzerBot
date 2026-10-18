@@ -2,6 +2,7 @@ package com.halty.gramalyzerbot.bot.screen;
 
 import com.halty.gramalyzerbot.analytics.AnalysisEngine;
 import com.halty.gramalyzerbot.analytics.Report;
+import com.halty.gramalyzerbot.i18n.Tr;
 import com.halty.gramalyzerbot.bot.ui.*;
 import com.halty.gramalyzerbot.channel.Channel;
 import com.halty.gramalyzerbot.channel.Permission;
@@ -38,42 +39,42 @@ public class HomeScreen {
         v.line("📺 <b>" + Fmt.esc(ch.getTitle()) + "</b>" + (ch.getUsername() != null && !ch.isDemo() ? "  <i>@" + Fmt.esc(ch.getUsername()) + "</i>" : ""));
         v.line(Fmt.rule());
         if (g.current() != null) {
-            String delta = g.change() == null ? "" : "   " + (g.change() >= 0 ? "▲ " : "▼ ") + Fmt.signed(g.change()) + " (30d)";
-            v.line("👥 <b>" + Fmt.num(g.current()) + "</b> subscribers" + delta);
+            String delta = g.change() == null ? "" : "   " + (g.change() >= 0 ? "▲ " : "▼ ") + Fmt.signed(g.change()) + " (" + Labels.windowShort(30) + ")";
+            v.line(Tr.t("home.subscribers", Fmt.num(g.current())) + delta);
         }
-        v.line("📝 <b>" + Fmt.num(total) + "</b> posts recorded · <b>" + Fmt.num(r.eligible()) + "</b> analysed (" + Labels.window(ch.getWindowDays()) + ")");
+        v.line(Tr.t("home.posts", Fmt.num(total), Fmt.num(r.eligible()), Labels.window(ch.getWindowDays())));
         if (r.eligible() > 0) {
             String comments = r.avgComments() > 0 ? " · 💭 " + Fmt.one(r.avgComments()) : "";
-            v.line("📈 Average post: ❤️ " + Fmt.one(r.avgReactions()) + comments);
+            v.line(Tr.t("home.average", Fmt.one(r.avgReactions())) + comments);
         }
-        v.line("🕒 Last post: " + last.map(p -> Fmt.ago(p.getPostedAt(), now)).orElse("none yet"));
+        v.line(Tr.t("home.last_post", last.map(p -> Fmt.ago(p.getPostedAt(), now)).orElse(Tr.t("home.none_yet"))));
         v.blank();
 
         List<String> play = Playbook.lines(r);
         if (!play.isEmpty()) {
-            v.line("<b>🎯 Your playbook</b>");
+            v.line(Tr.t("home.playbook"));
             v.line("<blockquote>" + String.join("\n", play) + "</blockquote>");
-            v.line("<i>" + Labels.confidence(r.confidence()) + " · based on " + r.eligible() + " posts</i>");
+            v.line("<i>" + Labels.confidence(r.confidence()) + " · " + Tr.n("home.based_on", r.eligible()) + "</i>");
             if (r.notes().contains(Report.Note.LOW_TIME_VARIETY))
-                v.line("💡 <i>You post at almost the same time every day, so I can't compare hours yet – try the experiments under Best times.</i>");
+                v.line(Tr.t("home.low_variety"));
         } else if (r.eligible() > 0 && !r.hasSignal()) {
-            v.line("🤔 <b>No reactions or comments yet.</b>");
-            v.line("Check that reactions are switched on for your channel – without them I have nothing to learn from.");
+            v.line(Tr.t("home.no_signal"));
+            v.line(Tr.t("home.no_signal_hint"));
         } else {
             int have = r.eligible(), need = AnalysisEngine.MIN_POSTS_FOR_TIMES;
-            v.line("🌱 <b>Still learning your channel</b>");
-            v.line(Fmt.progress(have, need, 10) + "  " + have + " / " + need + " posts");
-            if (!ch.isHistoryImported() && !ch.isDemo()) v.line("<i>Skip the wait: import your history with /import.</i>");
-            else v.line("<i>Posts count once they're a day old, so their reactions have settled.</i>");
+            v.line(Tr.t("home.learning"));
+            v.line(Fmt.progress(have, need, 10) + "  " + Tr.t("home.progress", have, need));
+            if (!ch.isHistoryImported() && !ch.isDemo()) v.line(Tr.t("home.skip_wait"));
+            else v.line(Tr.t("home.day_old"));
         }
 
         if (role.can(Permission.CHANGE_SETTINGS) && !ch.isDemo() && (!ch.isTimezoneConfirmed() || !ch.isHistoryImported())) {
             v.blank();
-            v.line("<b>🧰 Setup</b>");
-            v.line("✅ Channel connected");
-            v.line((ch.isTimezoneConfirmed() ? "✅" : "⬜") + " Timezone: " + Fmt.esc(TimeZones.label(ch.zone(), now)));
-            v.line((ch.isHistoryImported() ? "✅" : "⬜") + " History imported <i>(optional)</i>");
-            v.line((ch.getDiscussionChatId() != null ? "✅" : "⬜") + " Comments tracking <i>(optional)</i>");
+            v.line(Tr.t("home.setup"));
+            v.line(Tr.t("home.setup.connected"));
+            v.line((ch.isTimezoneConfirmed() ? "✅" : "⬜") + " " + Tr.t("home.setup.timezone", Fmt.esc(TimeZones.label(ch.zone(), now))));
+            v.line((ch.isHistoryImported() ? "✅" : "⬜") + " " + Tr.t("home.setup.history"));
+            v.line((ch.getDiscussionChatId() != null ? "✅" : "⬜") + " " + Tr.t("home.setup.comments"));
         }
 
         String health = health(ch, now);
@@ -83,25 +84,26 @@ public class HomeScreen {
         }
 
         long id = ch.getId();
-        v.row(Btn.cb("⏰ Best times", Cb.of("nav:times", id, ch.getWindowDays(), "main")),
-                Btn.cb("💡 What to write", Cb.of("nav:content", id, ch.getWindowDays(), "main")));
-        v.row(Btn.cb("🏆 Top posts", Cb.of("nav:top", id, 0)), Btn.cb("📈 Growth", Cb.of("nav:growth", id, 30)));
+        v.row(Btn.cb(Tr.t("btn.times"), Cb.of("nav:times", id, ch.getWindowDays(), "main")),
+                Btn.cb(Tr.t("btn.content"), Cb.of("nav:content", id, ch.getWindowDays(), "main")));
+        v.row(Btn.cb(Tr.t("btn.top"), Cb.of("nav:top", id, 0)), Btn.cb(Tr.t("btn.growth"), Cb.of("nav:growth", id, 30)));
         if (role.can(Permission.CHANGE_SETTINGS)) {
-            v.row(Btn.cb("⚙️ Settings", Cb.of("set:home", id)), Btn.cb("👥 Team", Cb.of("team:home", id)));
+            v.row(Btn.cb(Tr.t("btn.settings"), Cb.of("set:home", id)), Btn.cb(Tr.t("btn.team"), Cb.of("team:home", id)));
         } else {
-            v.row(Btn.cb("🔔 My notifications", Cb.of("me:home", id)), Btn.cb("👥 Team", Cb.of("team:home", id)));
+            v.row(Btn.cb(Tr.t("btn.my_notifications"), Cb.of("me:home", id)), Btn.cb(Tr.t("btn.team"), Cb.of("team:home", id)));
         }
-        v.row(Btn.cb("🔀 Channels", "ch:list"), Btn.cb("🔄 Refresh", Cb.of("nav:home", id)), Btn.cb("❓ Help", "help:home"));
+        v.row(Btn.cb(Tr.t("btn.watchlist"), "wl:list"), Btn.cb(Tr.t("btn.channels"), "ch:list"));
+        v.row(Btn.cb(Tr.t("btn.refresh"), Cb.of("nav:home", id)), Btn.cb(Tr.t("btn.language"), "lang:home"), Btn.cb(Tr.t("btn.help"), "help:home"));
         return v;
     }
 
     /** One line about whether data is flowing, or null when there's nothing to say. */
     static String health(Channel ch, Instant now) {
-        if (ch.isDemo()) return "🎮 <i>This is sample data – connect your own channel any time from 🔀 Channels.</i>";
-        if (!ch.isActive()) return "🔴 <b>I'm no longer an admin of this channel.</b> Add me again to keep collecting posts.";
-        if (ch.getLastPostEventAt() == null) return "🟡 Waiting for the next post – publish something and I'll pick it up.";
+        if (ch.isDemo()) return Tr.t("home.health.demo");
+        if (!ch.isActive()) return Tr.t("home.health.removed");
+        if (ch.getLastPostEventAt() == null) return Tr.t("home.health.waiting");
         if (ch.getLastReactionEventAt() == null && ch.getLastPostEventAt().isBefore(now.minusSeconds(6 * 3600)))
-            return "🟡 No reaction updates yet. They can take a while to arrive; make sure reactions are enabled on the channel.";
-        return "🟢 Live – last post seen " + Fmt.ago(ch.getLastPostEventAt(), now);
+            return Tr.t("home.health.no_reactions");
+        return Tr.t("home.health.live", Fmt.ago(ch.getLastPostEventAt(), now));
     }
 }

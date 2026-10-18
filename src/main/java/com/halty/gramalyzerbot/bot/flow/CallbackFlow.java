@@ -7,10 +7,15 @@ import com.halty.gramalyzerbot.bot.screen.*;
 import com.halty.gramalyzerbot.bot.ui.*;
 import com.halty.gramalyzerbot.channel.*;
 import com.halty.gramalyzerbot.common.UserFacingException;
+import com.halty.gramalyzerbot.i18n.Lang;
+import com.halty.gramalyzerbot.i18n.Tr;
 import com.halty.gramalyzerbot.post.AnalysisService;
 import com.halty.gramalyzerbot.post.DemoService;
 import com.halty.gramalyzerbot.post.PostService;
 import com.halty.gramalyzerbot.settings.BotSettings;
+import com.halty.gramalyzerbot.tracking.TrackedChannel;
+import com.halty.gramalyzerbot.tracking.TrackingException;
+import com.halty.gramalyzerbot.tracking.TrackingService;
 import com.halty.gramalyzerbot.user.User;
 import com.halty.gramalyzerbot.user.UserService;
 import com.halty.gramalyzerbot.user.UserState;
@@ -50,6 +55,8 @@ public class CallbackFlow {
     private final SettingsScreens settingsScreens;
     private final TeamScreens team;
     private final AdminScreens admin;
+    private final WatchFlow watch;
+    private final TrackingService tracking;
     private final BotSettings botSettings;
     private final BotApi gateway;
 
@@ -63,7 +70,7 @@ public class CallbackFlow {
     public void handle(Events.Callback c) {
         Optional<User> opt = sessions.open(c.userId(), c.username(), c.firstName(), c.lang(), c.chatId());
         if (opt.isEmpty()) {
-            gateway.answer(c.id(), "🚫 You've been blocked.", true);
+            gateway.answer(c.id(), Tr.t("toast.blocked"), true);
             return;
         }
         User u = opt.get();
@@ -72,12 +79,14 @@ public class CallbackFlow {
             toast = dispatch(u, c, Cb.parse(c.data()));
         } catch (UserFacingException e) {
             toast = new Toast(e.getMessage().replaceAll("<[^>]+>", ""), true);
+        } catch (TrackingException e) {
+            toast = new Toast(WatchScreens.error(e), true);
         } catch (ArrayIndexOutOfBoundsException | IllegalArgumentException e) { // includes NumberFormatException
             log.debug("Stale or malformed button {}: {}", c.data(), e.toString());
-            toast = new Toast("That button is out of date – open the menu again.", true);
+            toast = new Toast(Tr.t("toast.stale"), true);
         } catch (RuntimeException e) {
             log.error("Failed to handle button {}", c.data(), e);
-            toast = new Toast("Something went wrong. Please try again.", true);
+            toast = new Toast(Tr.t("toast.failed"), true);
         }
         gateway.answer(c.id(), toast.text(), toast.alert());
     }
@@ -97,6 +106,8 @@ public class CallbackFlow {
             case "team" -> teamAction(u, c, a);
             case "pm" -> postModeration(u, c, a);
             case "adm" -> adminAction(u, c, a);
+            case "wl" -> watchlist(u, c, a);
+            case "lang" -> language(u, c, a);
             default -> throw new IllegalArgumentException("unknown action " + a.get(0));
         };
     }
@@ -142,7 +153,7 @@ public class CallbackFlow {
             }
             case "check" -> {
                 Optional<Channel> ch = access.active(u);
-                if (ch.isEmpty()) return new Toast("I don't see a channel yet. Add me as an admin first, or send the channel's @username.", true);
+                if (ch.isEmpty()) return new Toast(Tr.t("toast.no_channel_yet"), true);
                 show(c, home.render(ch.get(), access.roleOf(u, ch.get())));
             }
             case "demo" -> {
@@ -151,7 +162,7 @@ public class CallbackFlow {
                 Channel ch = demo.createFor(u);
                 users.setActiveChannel(u, ch.getId());
                 show(c, home.render(ch, Role.OWNER));
-                return Toast.of("🎮 Sample channel ready");
+                return Toast.of(Tr.t("toast.demo_ready"));
             }
             default -> throw new IllegalArgumentException("unknown ch " + a.get(1));
         }
@@ -185,35 +196,35 @@ public class CallbackFlow {
                 Channel saved = settings.setTimezone(ch, u, zone);
                 users.clearState(u);
                 show(c, settingsScreens.home(saved, role));
-                return Toast.of("✅ Timezone saved");
+                return Toast.of(Tr.t("toast.tz_saved"));
             }
             case "win" -> show(c, settingsScreens.window(ch));
             case "winset" -> {
                 show(c, settingsScreens.home(settings.setWindow(ch, u, a.getInt(3)), role));
-                return Toast.of("✅ Saved");
+                return Toast.of(Tr.t("toast.saved"));
             }
             case "met" -> show(c, settingsScreens.metric(ch));
             case "metset" -> {
                 show(c, settingsScreens.home(settings.setMetric(ch, u, Metric.valueOf(a.get(3))), role));
-                return Toast.of("✅ Saved");
+                return Toast.of(Tr.t("toast.saved"));
             }
             case "dig" -> show(c, settingsScreens.digest(ch));
             case "dday" -> {
                 show(c, settingsScreens.digest(settings.setDigestDay(ch, u, DayOfWeek.valueOf(a.get(3)))));
-                return Toast.of("✅ Saved");
+                return Toast.of(Tr.t("toast.saved"));
             }
             case "dhour" -> {
                 show(c, settingsScreens.digest(settings.setDigestHour(ch, u, a.getInt(3))));
-                return Toast.of("✅ Saved");
+                return Toast.of(Tr.t("toast.saved"));
             }
             case "nud" -> show(c, settingsScreens.nudges(ch));
             case "lead" -> {
                 show(c, settingsScreens.nudges(settings.setNudgeLead(ch, u, a.getInt(3))));
-                return Toast.of("✅ Saved");
+                return Toast.of(Tr.t("toast.saved"));
             }
             case "gap" -> {
                 show(c, settingsScreens.nudges(settings.setNudgeGap(ch, u, a.getInt(3))));
-                return Toast.of("✅ Saved");
+                return Toast.of(Tr.t("toast.saved"));
             }
             case "com" -> show(c, settingsScreens.comments(ch, null));
             case "comchk" -> {
@@ -224,19 +235,17 @@ public class CallbackFlow {
                 users.setState(u, UserState.AWAIT_IMPORT, String.valueOf(id), Duration.ofMinutes(30));
                 show(c, settingsScreens.importPrompt(ch));
             }
-            case "reset" -> show(c, settingsScreens.confirm("🧹 <b>Reset all collected data for " + Fmt.esc(ch.getTitle()) + "?</b>\n\nPosts, reactions and subscriber history are deleted. Settings and team stay.",
-                    "🧹 Yes, reset", Cb.of("set:resetgo", id), Cb.of("set:home", id)));
+            case "reset" -> show(c, settingsScreens.confirm(Tr.t("confirm.reset", Fmt.esc(ch.getTitle())),
+                    Tr.t("confirm.reset_yes"), Cb.of("set:resetgo", id), Cb.of("set:home", id)));
             case "resetgo" -> {
                 channels.resetData(ch);
                 analysis.invalidate(id);
                 audit.record(id, u.getId(), "data.reset", "All collected data was reset");
                 show(c, settingsScreens.home(channels.get(id), role));
-                return Toast.of("🧹 Data reset");
+                return Toast.of(Tr.t("toast.data_reset"));
             }
-            case "disc" -> show(c, settingsScreens.confirm(ch.isDemo()
-                            ? "🗑 <b>Delete the sample channel?</b>"
-                            : "🔌 <b>Disconnect " + Fmt.esc(ch.getTitle()) + "?</b>\n\nAll its data and its team are deleted, and I'll leave the channel.",
-                    "Yes, " + (ch.isDemo() ? "delete" : "disconnect"), Cb.of("set:discgo", id), Cb.of("set:home", id)));
+            case "disc" -> show(c, settingsScreens.confirm(ch.isDemo() ? Tr.t("confirm.delete_demo") : Tr.t("confirm.disconnect", Fmt.esc(ch.getTitle())),
+                    Tr.t(ch.isDemo() ? "confirm.delete_yes" : "confirm.disconnect_yes"), Cb.of("set:discgo", id), Cb.of("set:home", id)));
             case "discgo" -> {
                 boolean demoChannel = ch.isDemo();
                 long chatId = ch.getTelegramChatId();
@@ -244,7 +253,7 @@ public class CallbackFlow {
                 if (!demoChannel) gateway.leave(chatId);
                 users.setActiveChannel(u, null);
                 show(c, start.channels(channels.forUser(u), null, u.isBotAdmin()));
-                return Toast.of(demoChannel ? "🗑 Deleted" : "🔌 Disconnected");
+                return Toast.of(Tr.t(demoChannel ? "toast.deleted" : "toast.disconnected"));
             }
             default -> throw new IllegalArgumentException("unknown set " + action);
         }
@@ -254,13 +263,13 @@ public class CallbackFlow {
     /** Looks up the channel's linked discussion group and confirms the bot can see it. */
     private String checkDiscussion(Channel ch, User actor) {
         Long linked = gateway.chat(ch.getTelegramChatId()).map(BotApi.ChatInfo::linkedChatId).orElse(null);
-        if (linked == null) return "⚠️ This channel has no discussion group linked yet.";
+        if (linked == null) return Tr.t("com.no_group");
         Optional<String> status = gateway.memberStatus(linked, gateway.botId());
         if (status.isPresent() && (status.get().equals("administrator") || status.get().equals("member") || status.get().equals("creator"))) {
             settings.linkDiscussion(ch, actor, linked);
-            return "✅ Linked! I'll count comments from now on.";
+            return Tr.t("com.linked");
         }
-        return "⚠️ A discussion group is linked, but I'm not in it yet. Add me as an admin there.";
+        return Tr.t("com.not_in_group");
     }
 
     private Toast me(User u, Events.Callback c, Cb.Args a) {
@@ -276,7 +285,7 @@ public class CallbackFlow {
     }
 
     private ChannelMember currentMember(Channel ch, User u) {
-        return membership.membership(ch, u).orElseThrow(() -> new UserFacingException("Join the team first to set notifications."));
+        return membership.membership(ch, u).orElseThrow(() -> new UserFacingException("err.join_first"));
     }
 
     // ------------------------------------------------------------------ team
@@ -294,17 +303,17 @@ public class CallbackFlow {
             case "role" -> {
                 membership.changeRole(ch, u, a.getLong(3), Role.valueOf(a.get(4)));
                 show(c, team.home(ch, u, role));
-                return Toast.of("✅ Role updated");
+                return Toast.of(Tr.t("toast.role_updated"));
             }
             case "rm" -> {
                 MembershipService.MemberRow row = findMember(ch, a.getLong(3));
-                show(c, settingsScreens.confirm("🚫 <b>Remove " + Fmt.esc(row.user().displayName()) + " from the team?</b>",
-                        "Yes, remove", Cb.of("team:rmgo", id, row.user().getId()), Cb.of("team:member", id, row.user().getId())));
+                show(c, settingsScreens.confirm(Tr.t("team.remove_q", Fmt.esc(row.user().displayName())),
+                        Tr.t("team.remove_yes"), Cb.of("team:rmgo", id, row.user().getId()), Cb.of("team:member", id, row.user().getId())));
             }
             case "rmgo" -> {
                 membership.remove(ch, u, a.getLong(3));
                 show(c, team.home(ch, u, role));
-                return Toast.of("✅ Removed");
+                return Toast.of(Tr.t("toast.removed"));
             }
             case "inv" -> {
                 Invite inv = membership.createInvite(ch, u, Role.valueOf(a.get(3)));
@@ -313,18 +322,18 @@ public class CallbackFlow {
             case "invrev" -> {
                 membership.revokeInvite(ch, u, a.getLong(3));
                 show(c, team.home(ch, u, role));
-                return Toast.of("🗑 Link revoked");
+                return Toast.of(Tr.t("toast.link_revoked"));
             }
             case "log" -> {
                 membership.require(ch, u, Permission.CHANGE_SETTINGS);
                 show(c, team.activity(ch));
             }
-            case "leave" -> show(c, settingsScreens.confirm("🚪 <b>Leave the team for " + Fmt.esc(ch.getTitle()) + "?</b>\n\nYou'll lose access until someone invites you again.",
-                    "Yes, leave", Cb.of("team:leavego", id), Cb.of("team:home", id)));
+            case "leave" -> show(c, settingsScreens.confirm(Tr.t("team.leave_q", Fmt.esc(ch.getTitle())),
+                    Tr.t("team.leave_yes"), Cb.of("team:leavego", id), Cb.of("team:home", id)));
             case "leavego" -> {
                 membership.leave(ch, u);
                 show(c, start.channels(channels.forUser(u), null, u.isBotAdmin()));
-                return Toast.of("👋 You left the team");
+                return Toast.of(Tr.t("toast.left"));
             }
             default -> throw new IllegalArgumentException("unknown team " + a.get(1));
         }
@@ -333,7 +342,7 @@ public class CallbackFlow {
 
     private MembershipService.MemberRow findMember(Channel ch, long userId) {
         return membership.team(ch).stream().filter(r -> r.user().getId() == userId).findFirst()
-                .orElseThrow(() -> new UserFacingException("That person is no longer on the team."));
+                .orElseThrow(() -> new UserFacingException("err.person_gone"));
     }
 
     // ------------------------------------------------------------------ post moderation
@@ -349,15 +358,15 @@ public class CallbackFlow {
                         (nowExcluded ? "Excluded" : "Restored") + " a post " + (nowExcluded ? "from" : "to") + " the analysis");
                 if (a.get(4).equals("x")) show(c, insights.excluded(ch, role));
                 else show(c, insights.top(ch, role, a.get(4).isEmpty() ? 0 : a.getInt(4)));
-                return Toast.of(nowExcluded ? "🚫 Left out of the analysis" : "↩ Back in the analysis");
+                return Toast.of(Tr.t(nowExcluded ? "toast.excluded" : "toast.restored"));
             }
             case "topic" -> {
                 posts.getFor(ch, postId); // make sure it exists
                 users.setState(u, UserState.AWAIT_TOPIC, ch.getId() + ":" + postId, PROMPT_TTL);
-                show(c, new View().line("🏷 <b>Label this post</b>").blank()
-                        .line("Send me a short topic, like <code>giveaway</code> or <code>review</code>. I'll group posts with the same topic.")
-                        .line("Send <code>-</code> to clear the label.")
-                        .row(Btn.cb("✖ Cancel", Cb.of("nav:top", ch.getId(), 0))));
+                show(c, new View().line(Tr.t("flow.topic_title")).blank()
+                        .line(Tr.t("flow.topic_hint"))
+                        .line(Tr.t("flow.topic_clear"))
+                        .row(Btn.cb(Tr.t("btn.cancel"), Cb.of("nav:top", ch.getId(), 0))));
             }
             default -> throw new IllegalArgumentException("unknown pm " + a.get(1));
         }
@@ -367,33 +376,88 @@ public class CallbackFlow {
     // ------------------------------------------------------------------ bot admin
 
     private Toast adminAction(User u, Events.Callback c, Cb.Args a) {
-        if (!u.isBotAdmin()) throw new UserFacingException("🔒 Bot admins only.");
+        if (!u.isBotAdmin()) throw new UserFacingException("err.admins_only");
         switch (a.get(1)) {
             case "home" -> {
                 users.clearState(u);
                 show(c, admin.home());
             }
             case "users" -> show(c, admin.users(a.getInt(2)));
-            case "user" -> show(c, admin.user(users.findByTelegramId(a.getLong(2)).orElseThrow(() -> new UserFacingException("Unknown user."))));
+            case "user" -> show(c, admin.user(users.findByTelegramId(a.getLong(2)).orElseThrow(() -> new UserFacingException("err.unknown_user"))));
             case "ban", "unban" -> {
                 boolean ban = a.get(1).equals("ban");
-                User existing = users.findByTelegramId(a.getLong(2)).orElseThrow(() -> new UserFacingException("Unknown user."));
-                if (existing.isBotAdmin()) throw new UserFacingException("Bot admins can't be banned.");
+                User existing = users.findByTelegramId(a.getLong(2)).orElseThrow(() -> new UserFacingException("err.unknown_user"));
+                if (existing.isBotAdmin()) throw new UserFacingException("err.cant_ban_admin");
                 User target = users.setBanned(existing.getTelegramId(), ban).orElse(existing);
                 show(c, admin.user(target));
-                return Toast.of(ban ? "🚫 Banned" : "✅ Unbanned");
+                return Toast.of(Tr.t(ban ? "toast.banned" : "toast.unbanned"));
             }
             case "chs" -> show(c, admin.channels(a.getInt(2)));
             case "reg" -> {
                 botSettings.setPublicRegistration(!botSettings.publicRegistration());
                 show(c, admin.home());
-                return Toast.of("✅ Saved");
+                return Toast.of(Tr.t("toast.saved"));
             }
             case "banask" -> {
                 users.setState(u, UserState.AWAIT_BAN, "", PROMPT_TTL);
                 show(c, admin.banPrompt());
             }
             default -> throw new IllegalArgumentException("unknown adm " + a.get(1));
+        }
+        return Toast.NONE;
+    }
+
+    // ------------------------------------------------------------------ watchlist
+
+    private Toast watchlist(User u, Events.Callback c, Cb.Args a) {
+        String owner = TrackingService.owner(u);
+        switch (a.get(1)) {
+            case "list" -> {
+                users.clearState(u);
+                show(c, watch.list(u));
+            }
+            case "add" -> show(c, watch.askForChannel(u));
+            case "show" -> show(c, watch.card(u, tracking.get(a.getLong(2)), null));
+            case "top" -> show(c, watch.top(tracking.get(a.getLong(2))));
+            case "ref" -> {
+                gateway.typing(c.chatId());
+                TrackedChannel ch = tracking.refresh(tracking.get(a.getLong(2)), true);
+                show(c, watch.card(u, ch, null));
+                return Toast.of(Tr.t("watch.refreshed"));
+            }
+            case "rm" -> {
+                tracking.untrack(owner, tracking.get(a.getLong(2)).getUsername());
+                show(c, watch.list(u));
+                return Toast.of(Tr.t("watch.removed"));
+            }
+            case "addid", "addu" -> {
+                gateway.typing(c.chatId());
+                String username = a.get(1).equals("addid") ? tracking.get(a.getLong(2)).getUsername() : a.get(2);
+                TrackedChannel ch = tracking.track(owner, username);
+                show(c, watch.card(u, ch, null));
+                return Toast.of(Tr.t("watch.added"));
+            }
+            default -> throw new IllegalArgumentException("unknown wl " + a.get(1));
+        }
+        return Toast.NONE;
+    }
+
+    // ------------------------------------------------------------------ language
+
+    private Toast language(User u, Events.Callback c, Cb.Args a) {
+        switch (a.get(1)) {
+            case "home" -> show(c, start.languages(Tr.lang()));
+            case "set" -> {
+                String code = a.get(2).equals("auto") ? null : Lang.fromCode(a.get(2)).orElseThrow(IllegalArgumentException::new).code();
+                users.setLanguage(u, code);
+                Lang now = Lang.of(u);
+                Tr.use(now);
+                show(c, start.languages(now));
+                // the bottom keyboard only changes with a new message
+                gateway.sendWithKeyboard(c.chatId(), Tr.t("lang.saved", now.nativeName()), Menu.keyboard());
+                return Toast.of("✅ " + now.label());
+            }
+            default -> throw new IllegalArgumentException("unknown lang " + a.get(1));
         }
         return Toast.NONE;
     }

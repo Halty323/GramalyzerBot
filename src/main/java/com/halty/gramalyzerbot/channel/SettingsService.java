@@ -39,7 +39,7 @@ public class SettingsService {
 
     public Channel setWindow(Channel ch, User actor, int days) {
         guard(ch, actor);
-        if (!WINDOWS.contains(days)) throw new UserFacingException("That window isn't available.");
+        if (!WINDOWS.contains(days)) throw new UserFacingException("err.bad_choice");
         ch.setWindowDays(days);
         return done(ch, actor, "settings.window", "Analysis window → " + (days == 0 ? "all time" : days + " days"));
     }
@@ -58,21 +58,21 @@ public class SettingsService {
 
     public Channel setDigestHour(Channel ch, User actor, int hour) {
         guard(ch, actor);
-        if (hour < 0 || hour > 23) throw new UserFacingException("Pick an hour between 0 and 23.");
+        if (hour < 0 || hour > 23) throw new UserFacingException("err.bad_hour");
         ch.setDigestHour(hour);
         return done(ch, actor, "settings.digest", "Digest hour → " + String.format("%02d:00", hour));
     }
 
     public Channel setNudgeLead(Channel ch, User actor, int minutes) {
         guard(ch, actor);
-        if (!LEADS.contains(minutes)) throw new UserFacingException("That lead time isn't available.");
+        if (!LEADS.contains(minutes)) throw new UserFacingException("err.bad_choice");
         ch.setNudgeLeadMinutes(minutes);
         return done(ch, actor, "settings.nudge", "Nudge lead time → " + minutes + " min");
     }
 
     public Channel setNudgeGap(Channel ch, User actor, int hours) {
         guard(ch, actor);
-        if (!GAPS.contains(hours)) throw new UserFacingException("That quiet period isn't available.");
+        if (!GAPS.contains(hours)) throw new UserFacingException("err.bad_choice");
         ch.setNudgeGapHours(hours);
         return done(ch, actor, "settings.nudge", "Nudge quiet period → " + hours + " h");
     }

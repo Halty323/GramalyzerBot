@@ -1,0 +1,326 @@
+package com.halty.gramalyzerbot.tracking;
+
+import com.halty.gramalyzerbot.bot.BotApi;
+import com.halty.gramalyzerbot.tracking.PreviewParser.Preview;
+import com.halty.gramalyzerbot.tracking.PreviewParser.PreviewPost;
+import com.halty.gramalyzerbot.tracking.TrackingException.Code;
+import com.halty.gramalyzerbot.user.User;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
+
+import java.io.IOException;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.util.*;
+import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+
+/**
+ * Keeps an eye on public channels nobody had to add the bot to. Everything comes from what Telegram shows anyone:
+ * the channel's web preview ({@code t.me/s/<username>}: title, counters, the latest posts with views and reactions)
+ * and, when the bot is running, {@code getChat} and {@code getChatMemberCount}, which answer for public channels too.
+ * <p>
+ * Channels are shared: a channel watched by the website and by three people in the bot is fetched once. Each refresh
+ * updates the posts still on the preview page and the day's snapshot, which builds the subscriber history over time.
+ */
+@Service
+@Slf4j
+public class TrackingService {
+
+    /** The website's single workspace. */
+    public static final String WEB = "web";
+
+    /** Telegram usernames: 5–32 characters, start with a letter. Short or reserved ones are rejected by Telegram itself. */
+    private static final Pattern USERNAME = Pattern.compile("[A-Za-z][A-Za-z0-9_]{3,31}");
+    private static final Pattern LINK = Pattern.compile("^(?:https?://)?(?:www\\.)?(?:t\\.me|telegram\\.me|telegram\\.dog)/(?:s/)?([^/?#]+)(?:[/?#].*)?$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern RESOLVE = Pattern.compile("^tg://resolve\\?domain=([A-Za-z0-9_]+).*$", Pattern.CASE_INSENSITIVE);
+    /** A preview this recent is served as is. */
+    private static final Duration FRESH = Duration.ofMinutes(10);
+
+    private final TrackedChannelRepository channels;
+    private final TrackedPostRepository posts;
+    private final TrackedSnapshotRepository snapshots;
+    private final TrackedWatcherRepository watchers;
+    private final PreviewClient client;
+    private final BotApi bot;
+    private final TransactionTemplate tx;
+    private final int maxPerPerson;
+    private final int maxWeb;
+
+    public TrackingService(TrackedChannelRepository channels, TrackedPostRepository posts, TrackedSnapshotRepository snapshots,
+                           TrackedWatcherRepository watchers, PreviewClient client, BotApi bot, TransactionTemplate tx,
+                           @Value("${gramalyzer.tracking.max-per-person:20}") int maxPerPerson,
+                           @Value("${gramalyzer.tracking.max-web:100}") int maxWeb) {
+        this.channels = channels;
+        this.posts = posts;
+        this.snapshots = snapshots;
+        this.watchers = watchers;
+        this.client = client;
+        this.bot = bot;
+        this.tx = tx;
+        this.maxPerPerson = maxPerPerson;
+        this.maxWeb = maxWeb;
+    }
+
+    /** A person's watchlist in the bot. */
+    public static String owner(User u) { return "tg:" + u.getId(); }
+
+    // ------------------------------------------------------------------ usernames
+
+    /**
+     * Turns what people paste into a username: {@code @name}, {@code name}, {@code t.me/name}, {@code https://t.me/s/name/42},
+     * {@code tg://resolve?domain=name}. Lower-case, without "@".
+     */
+    public static String username(String input) {
+        String s = input == null ? "" : input.trim();
+        Matcher link = LINK.matcher(s);
+        if (link.matches()) {
+            s = link.group(1);
+            if (s.startsWith("+") || s.equalsIgnoreCase("joinchat") || s.equalsIgnoreCase("c")) throw new TrackingException(Code.PRIVATE_LINK);
+        } else {
+            Matcher resolve = RESOLVE.matcher(s);
+            if (resolve.matches()) s = resolve.group(1);
+        }
+        s = s.replaceFirst("^@", "");
+        if (!USERNAME.matcher(s).matches()) throw new TrackingException(Code.INVALID_USERNAME);
+        return s.toLowerCase(Locale.ROOT);
+    }
+
+    // ------------------------------------------------------------------ watchlists
+
+    public List<TrackedChannel> watched(String owner) {
+        List<Long> ids = watchers.findAllByOwnerOrderByCreatedAtAsc(owner).stream().map(TrackedWatcher::getTrackedChannelId).toList();
+        Map<Long, TrackedChannel> byId = channels.findAllById(ids).stream().collect(Collectors.toMap(TrackedChannel::getId, Function.identity()));
+        return ids.stream().map(byId::get).filter(Objects::nonNull).toList();
+    }
+
+    public boolean watching(String owner, TrackedChannel c) {
+        return watchers.findByTrackedChannelIdAndOwner(c.getId(), owner).isPresent();
+    }
+
+    /** Adds a channel to a watchlist, fetching it first if nobody has looked at it recently. */
+    public TrackedChannel track(String owner, String input) {
+        String username = username(input);
+        TrackedChannel c = lookup(username);
+        if (watching(owner, c)) return c;
+        int max = WEB.equals(owner) ? maxWeb : maxPerPerson;
+        if (watchers.countByOwner(owner) >= max) throw new TrackingException(Code.LIMIT);
+        try {
+            watchers.save(new TrackedWatcher(c.getId(), owner));
+        } catch (org.springframework.dao.DataIntegrityViolationException alreadyThere) {
+            // the same person tracked it twice at once
+        }
+        return c;
+    }
+
+    public void untrack(String owner, String input) {
+        TrackedChannel c = channels.findByUsername(username(input)).orElseThrow(() -> new TrackingException(Code.NOT_TRACKED));
+        TrackedWatcher w = watchers.findByTrackedChannelIdAndOwner(c.getId(), owner).orElseThrow(() -> new TrackingException(Code.NOT_TRACKED));
+        watchers.delete(w);
+    }
+
+    // ------------------------------------------------------------------ channels
+
+    /** The channel as last fetched, fetching it now if it's new or stale. Doesn't add it to any watchlist. */
+    public TrackedChannel lookup(String input) {
+        String username = username(input);
+        Optional<TrackedChannel> known = channels.findByUsername(username);
+        if (known.isPresent()) return refresh(known.get(), false);
+        return fetch(username, null);
+    }
+
+    /** A channel somebody already looked at; never fetches. */
+    public Optional<TrackedChannel> find(String input) { return channels.findByUsername(username(input)); }
+
+    /** A channel by its id, for the bot's buttons; never fetches. */
+    public TrackedChannel get(long id) { return channels.findById(id).orElseThrow(() -> new TrackingException(Code.NOT_FOUND)); }
+
+    /**
+     * Fetches the channel again unless the last fetch is recent (or {@code force}). A failed refresh of a channel we
+     * already know keeps the old data and records the reason in {@code lastError}.
+     */
+    public TrackedChannel refresh(TrackedChannel c, boolean force) {
+        if (c.isDemo()) return c;
+        if (!force && c.getFetchedAt() != null && c.getFetchedAt().isAfter(Instant.now().minus(FRESH)) && c.getLastError() == null) return c;
+        try {
+            return fetch(c.getUsername(), c);
+        } catch (TrackingException e) {
+            if (e.code() == Code.NOT_FOUND || e.code() == Code.NOT_CHANNEL || e.code() == Code.UNREACHABLE) {
+                c.setLastError(e.code().key());
+                channels.save(c);
+            }
+            if (force) throw e;
+            return c;
+        }
+    }
+
+    public List<TrackedPost> posts(TrackedChannel c) {
+        return posts.findTop60ByTrackedChannelIdOrderByMessageIdDesc(c.getId());
+    }
+
+    public TrackedStats stats(TrackedChannel c, ZoneId zone) {
+        List<TrackedSnapshot> history = snapshots.findAllByTrackedChannelIdAndDayAfterOrderByDayAsc(c.getId(), LocalDate.now(ZoneOffset.UTC).minusDays(91));
+        return TrackedStats.of(c.getSubscribers(), posts(c), history, Instant.now(), zone);
+    }
+
+    /** Channels on at least one watchlist that the scheduled refresh should visit. */
+    public List<TrackedChannel> watchedAnywhere() { return channels.findAllWatched(); }
+
+    /** Forgets channels somebody only looked at, after a while; their pages can always be fetched again. */
+    public int forgetUnwatched(Duration olderThan) {
+        List<TrackedChannel> stale = channels.findUnwatchedCreatedBefore(Instant.now().minus(olderThan));
+        for (TrackedChannel c : stale) delete(c);
+        return stale.size();
+    }
+
+    void delete(TrackedChannel c) {
+        tx.executeWithoutResult(s -> {
+            posts.deleteAllByChannel(c.getId());
+            snapshots.deleteAllByChannel(c.getId());
+            channels.deleteById(c.getId());
+        });
+    }
+
+    // ------------------------------------------------------------------ fetching
+
+    private TrackedChannel fetch(String username, TrackedChannel existing) {
+        Preview preview = null;
+        TrackingException failure = null;
+        try {
+            preview = readPreview(username, existing == null);
+        } catch (TrackingException e) {
+            failure = e;
+        }
+        Optional<BotApi.ChatInfo> api = bot.enabled() ? bot.chat("@" + username) : Optional.empty();
+        if (api.isPresent() && !"channel".equals(api.get().type())) throw new TrackingException(Code.NOT_CHANNEL);
+        if (preview == null && api.isEmpty()) throw failure;
+        Integer exact = api.isPresent() ? bot.memberCount("@" + username).orElse(null) : null;
+
+        TrackedChannel c = existing != null ? existing : new TrackedChannel(username, username);
+        if (preview != null) {
+            c.setTitle(trunc(preview.title(), 255));
+            c.setDescription(trunc(preview.description(), 2048));
+            c.setPhotoUrl(trunc(preview.photoUrl(), 1024));
+            c.setVerified(preview.verified());
+            if (preview.subscribers() != null) c.setSubscribers(preview.subscribers());
+            if (!preview.counters().isEmpty()) {
+                c.setPhotos(preview.counters().get("photo"));
+                c.setVideos(preview.counters().get("video"));
+                c.setFiles(preview.counters().get("file"));
+                c.setLinks(preview.counters().get("link"));
+            }
+        }
+        if (api.isPresent()) {
+            BotApi.ChatInfo info = api.get();
+            c.setTelegramChatId(info.id());
+            if (info.title() != null) c.setTitle(trunc(info.title(), 255));
+            if (info.description() != null) c.setDescription(trunc(info.description(), 2048));
+        }
+        if (exact != null) c.setSubscribers(exact);
+        c.setFetchedAt(Instant.now());
+        c.setLastError(null);
+        TrackedChannel saved;
+        try {
+            saved = channels.save(c);
+        } catch (org.springframework.dao.DataIntegrityViolationException raced) {
+            // somebody else fetched the same new channel a moment ago
+            saved = channels.findByUsername(username).orElseThrow(() -> raced);
+        }
+        if (preview != null) store(saved, preview.posts());
+        snapshot(saved);
+        return saved;
+    }
+
+    /** The preview page, plus one older page the first time so the stats start from ~40 posts instead of ~20. */
+    private Preview readPreview(String username, boolean firstTime) {
+        try {
+            PreviewClient.Page page = client.preview(username, null);
+            if (page.status() == 404) throw new TrackingException(Code.NOT_FOUND);
+            if (page.status() >= 500 || page.status() == 429) throw new TrackingException(Code.UNREACHABLE);
+            Optional<Preview> preview = PreviewParser.preview(page.html(), username);
+            if (preview.isEmpty()) {
+                // t.me/s/ redirects everything that isn't a channel with a preview to the plain page
+                String html = page.url().contains("/s/") ? client.page(username).html() : page.html();
+                return switch (PreviewParser.page(html)) {
+                    case CHANNEL -> PreviewParser.fallback(html, username).orElseThrow(() -> new TrackingException(Code.NOT_FOUND));
+                    case GROUP, OTHER -> throw new TrackingException(Code.NOT_CHANNEL);
+                    case MISSING -> throw new TrackingException(Code.NOT_FOUND);
+                };
+            }
+            Preview p = preview.get();
+            if (firstTime && p.posts().size() >= 10) {
+                int oldest = p.posts().stream().mapToInt(PreviewPost::messageId).min().orElse(0);
+                try {
+                    Optional<Preview> older = PreviewParser.preview(client.preview(username, oldest).html(), username);
+                    if (older.isPresent()) {
+                        List<PreviewPost> all = new ArrayList<>(older.get().posts());
+                        all.addAll(p.posts());
+                        p = new Preview(p.username(), p.title(), p.description(), p.photoUrl(), p.subscribers(), p.verified(), p.counters(), all);
+                    }
+                } catch (IOException e) {
+                    log.debug("Older posts of @{} unavailable: {}", username, e.getMessage());
+                }
+            }
+            return p;
+        } catch (IOException e) {
+            log.info("Could not fetch the preview of @{}: {}", username, e.getMessage());
+            throw new TrackingException(Code.UNREACHABLE, e);
+        }
+    }
+
+    private void store(TrackedChannel c, List<PreviewPost> fresh) {
+        if (fresh.isEmpty()) return;
+        Map<Integer, PreviewPost> byId = new LinkedHashMap<>();
+        for (PreviewPost p : fresh) byId.put(p.messageId(), p);
+        tx.executeWithoutResult(s -> {
+            Map<Integer, TrackedPost> known = posts.findAllByTrackedChannelIdAndMessageIdIn(c.getId(), byId.keySet()).stream()
+                    .collect(Collectors.toMap(TrackedPost::getMessageId, Function.identity()));
+            Instant now = Instant.now();
+            List<TrackedPost> batch = new ArrayList<>();
+            for (PreviewPost p : byId.values()) {
+                TrackedPost t = known.getOrDefault(p.messageId(), new TrackedPost());
+                t.setTrackedChannelId(c.getId());
+                t.setMessageId(p.messageId());
+                t.setPostedAt(p.postedAt());
+                t.setKind(p.kind());
+                t.setBody(trunc(p.text(), 8192));
+                if (p.views() != null) t.setViews(p.views());
+                t.setReactions(p.reactions());
+                t.setReactionBreakdown(p.reactionBreakdown());
+                t.setMediaUrl(trunc(p.mediaUrl(), 1024));
+                t.setHasLink(p.hasLink());
+                t.setForwardedFrom(trunc(p.forwardedFrom(), 255));
+                t.setEdited(p.edited());
+                t.setUpdatedAt(now);
+                batch.add(t);
+            }
+            posts.saveAll(batch);
+        });
+    }
+
+    /** Today's row: subscribers and average views as of this refresh. */
+    void snapshot(TrackedChannel c) {
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+        Integer avg = TrackedStats.of(c.getSubscribers(), posts(c), List.of(), Instant.now(), ZoneOffset.UTC).avgViews();
+        TrackedSnapshot s = snapshots.findByTrackedChannelIdAndDay(c.getId(), today).orElseGet(() -> new TrackedSnapshot(c.getId(), today));
+        if (c.getSubscribers() != null) s.setSubscribers(c.getSubscribers());
+        if (avg != null) s.setAvgViews(avg);
+        try {
+            snapshots.save(s);
+        } catch (org.springframework.dao.DataIntegrityViolationException raced) {
+            // two refreshes of the same channel on the same day; one row is enough
+        }
+    }
+
+    private static String trunc(String s, int max) {
+        if (s == null) return null;
+        return s.length() <= max ? s : s.substring(0, max - 1) + "…";
+    }
+}

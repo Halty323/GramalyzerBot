@@ -3,6 +3,8 @@ package com.halty.gramalyzerbot.bot;
 import com.halty.gramalyzerbot.bot.ui.Btn;
 import com.halty.gramalyzerbot.bot.ui.View;
 import com.halty.gramalyzerbot.config.BotProperties;
+import com.halty.gramalyzerbot.i18n.Lang;
+import com.halty.gramalyzerbot.i18n.Tr;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -64,7 +66,7 @@ public class BotApi {
     static final List<String> ALLOWED_UPDATES = List.of(
             "message", "callback_query", "channel_post", "edited_channel_post", "my_chat_member", "message_reaction_count");
 
-    public record ChatInfo(long id, String type, String title, String username, Long linkedChatId) {}
+    public record ChatInfo(long id, String type, String title, String username, Long linkedChatId, String description) {}
 
     /** Null when Telegram polling is disabled. */
     private final TelegramClient client;
@@ -86,26 +88,24 @@ public class BotApi {
         return client;
     }
 
-    /** Publishes the command menu and learns who we are – after startup, so a slow Telegram never delays it. */
+    /** The commands in Telegram's menu, in order; their descriptions are {@code cmd.<name>} in each language. */
+    static final List<String> COMMANDS = List.of("menu", "overview", "times", "content", "top", "watchlist", "track", "settings",
+            "team", "channels", "import", "language", "demo", "help", "cancel");
+
+    /** Publishes the command menu in every language and learns who we are – after startup, so a slow Telegram never delays it. */
     @EventListener(ApplicationReadyEvent.class)
     void init() {
         if (client == null) return;
-        try {
-            client().execute(SetMyCommands.builder().commands(List.of(
-                    new BotCommand("menu", "Open the main menu"),
-                    new BotCommand("overview", "Dashboard for your channel"),
-                    new BotCommand("times", "Best times to post"),
-                    new BotCommand("content", "What to write about"),
-                    new BotCommand("top", "Top posts"),
-                    new BotCommand("settings", "Channel settings"),
-                    new BotCommand("team", "Admins and moderators"),
-                    new BotCommand("channels", "Switch or connect channels"),
-                    new BotCommand("import", "Import channel history"),
-                    new BotCommand("demo", "Explore with sample data"),
-                    new BotCommand("help", "How this bot works"),
-                    new BotCommand("cancel", "Cancel what I'm doing"))).build());
-        } catch (Exception e) {
-            log.warn("Could not publish the command menu: {}", e.getMessage());
+        for (Lang lang : Lang.values()) {
+            try {
+                List<BotCommand> commands = Tr.in(lang, () -> COMMANDS.stream().map(c -> new BotCommand(c, Tr.t("cmd." + c))).toList());
+                var request = SetMyCommands.builder().commands(commands);
+                // English is the default for every language without its own list
+                if (lang != Lang.EN) request.languageCode(lang.code());
+                client().execute(request.build());
+            } catch (Exception e) {
+                log.warn("Could not publish the {} command menu: {}", lang.code(), e.getMessage());
+            }
         }
         botUsername();
     }
@@ -241,7 +241,7 @@ public class BotApi {
     public Optional<ChatInfo> chat(String idOrUsername) {
         try {
             var c = client().execute(GetChat.builder().chatId(idOrUsername).build());
-            return Optional.of(new ChatInfo(c.getId(), c.getType(), c.getTitle(), c.getUserName(), c.getLinkedChatId()));
+            return Optional.of(new ChatInfo(c.getId(), c.getType(), c.getTitle(), c.getUserName(), c.getLinkedChatId(), c.getDescription()));
         } catch (Exception e) {
             log.debug("getChat {} failed: {}", idOrUsername, e.getMessage());
             return Optional.empty();
@@ -270,9 +270,12 @@ public class BotApi {
         }
     }
 
-    public Optional<Integer> memberCount(long chatId) {
+    public Optional<Integer> memberCount(long chatId) { return memberCount(String.valueOf(chatId)); }
+
+    /** Accepts a numeric id or "@username"; public channels answer even when the bot isn't a member. */
+    public Optional<Integer> memberCount(String idOrUsername) {
         try {
-            return Optional.ofNullable(client().execute(GetChatMemberCount.builder().chatId(String.valueOf(chatId)).build()));
+            return Optional.ofNullable(client().execute(GetChatMemberCount.builder().chatId(idOrUsername).build()));
         } catch (Exception e) {
             log.debug("getChatMemberCount failed: {}", e.getMessage());
             return Optional.empty();
