@@ -8,6 +8,7 @@ public final class UserState {
     public static final String AWAIT_CONNECT = "AWAIT_CONNECT";
     public static final String AWAIT_TOPIC = "AWAIT_TOPIC";
     public static final String AWAIT_BAN = "AWAIT_BAN";
+    public static final String AWAIT_TRACK = "AWAIT_TRACK";
 
     private UserState() {}
 }

@@ -1,5 +1,7 @@
 package com.halty.gramalyzerbot.bot.ui;
 
+import com.halty.gramalyzerbot.i18n.Tr;
+
 import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.Instant;
@@ -21,21 +23,33 @@ public final class Fmt {
 
     public static String num(long n) { return String.format(Locale.US, "%,d", n); }
 
+    /** 980 → "980", 12_300 → "12.3K", 1_250_000 → "1.3M". */
+    public static String compact(long n) {
+        if (Math.abs(n) < 1000) return String.valueOf(n);
+        if (Math.abs(n) < 1_000_000) return String.format(Locale.US, n < 100_000 ? "%.1fK" : "%.0fK", n / 1000.0).replace(".0K", "K");
+        return String.format(Locale.US, "%.1fM", n / 1_000_000.0).replace(".0M", "M");
+    }
+
     public static String signed(long n) { return n > 0 ? "+" + num(n) : n < 0 ? "−" + num(-n) : "±0"; }
 
     public static String lift(double x) { return String.format(Locale.US, "%.1f×", x); }
 
     public static String one(double x) { return String.format(Locale.US, "%.1f", x); }
 
-    public static String dayShort(DayOfWeek d) { return d.getDisplayName(TextStyle.SHORT, Locale.ENGLISH); }
+    /** In the current language ({@link Tr}), capitalised: "Tue", "Вт", "Sel". */
+    public static String dayShort(DayOfWeek d) { return capital(d.getDisplayName(TextStyle.SHORT_STANDALONE, Tr.locale()).replace(".", "")); }
 
-    public static String dayLong(DayOfWeek d) { return d.getDisplayName(TextStyle.FULL, Locale.ENGLISH); }
+    public static String dayLong(DayOfWeek d) { return capital(d.getDisplayName(TextStyle.FULL_STANDALONE, Tr.locale())); }
+
+    private static String capital(String s) {
+        if (s.isEmpty()) return s;
+        int first = s.codePointAt(0);
+        return new String(Character.toChars(Character.toTitleCase(first))) + s.substring(Character.charCount(first));
+    }
 
     public static String hour(int h) { return String.format(Locale.ROOT, "%02d:00", h); }
 
     public static String hourRange(int h) { return hour(h) + "–" + hour((h + 1) % 24); }
-
-    public static String plural(long n, String one, String many) { return num(n) + " " + (n == 1 ? one : many); }
 
     public static String trunc(String s, int max) {
         if (s == null) return "";
@@ -72,12 +86,12 @@ public final class Fmt {
     }
 
     public static String ago(Instant then, Instant now) {
-        if (then == null) return "never";
+        if (then == null) return Tr.t("fmt.never");
         Duration d = Duration.between(then, now);
-        if (d.isNegative() || d.toMinutes() < 1) return "just now";
-        if (d.toMinutes() < 60) return d.toMinutes() + "m ago";
-        if (d.toHours() < 48) return d.toHours() + "h ago";
-        return d.toDays() + "d ago";
+        if (d.isNegative() || d.toMinutes() < 1) return Tr.t("fmt.just_now");
+        if (d.toMinutes() < 60) return Tr.t("fmt.minutes_ago", d.toMinutes());
+        if (d.toHours() < 48) return Tr.t("fmt.hours_ago", d.toHours());
+        return Tr.t("fmt.days_ago", d.toDays());
     }
 
     public static String rule() { return "━━━━━━━━━━━━━━━━"; }

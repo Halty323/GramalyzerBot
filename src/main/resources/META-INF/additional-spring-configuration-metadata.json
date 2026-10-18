@@ -24,6 +24,26 @@
       "name": "telegram.bot.default-timezone",
       "type": "java.lang.String",
       "description": "Timezone assigned to newly connected channels."
+    },
+    {
+      "name": "gramalyzer.tracking.refresh-enabled",
+      "type": "java.lang.Boolean",
+      "description": "Refresh watched public channels in the background. Turn off where t.me can't be reached."
+    },
+    {
+      "name": "gramalyzer.tracking.refresh-every",
+      "type": "java.time.Duration",
+      "description": "How often every watched public channel is fetched again; each visit adds a day to its subscriber history."
+    },
+    {
+      "name": "gramalyzer.tracking.max-per-person",
+      "type": "java.lang.Integer",
+      "description": "How many public channels one person can keep on their watchlist in the bot."
+    },
+    {
+      "name": "gramalyzer.tracking.max-web",
+      "type": "java.lang.Integer",
+      "description": "How many public channels the website's watchlist can hold."
     }
   ]
 }

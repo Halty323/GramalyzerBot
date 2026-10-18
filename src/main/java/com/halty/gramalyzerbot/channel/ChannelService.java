@@ -35,7 +35,7 @@ public class ChannelService {
     public Optional<Channel> byWorkspaceId(String workspaceChannelId) { return channels.findByWorkspaceChannelId(workspaceChannelId); }
 
     public Channel get(long id) {
-        return channels.findById(id).orElseThrow(() -> new UserFacingException("That channel no longer exists."));
+        return channels.findById(id).orElseThrow(() -> new UserFacingException("err.channel_gone"));
     }
 
     /** Creates the channel on first sight, otherwise refreshes its title and marks the bot as present. */

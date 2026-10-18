@@ -1,6 +1,8 @@
 package com.halty.gramalyzerbot.bot.screen;
 
 import com.halty.gramalyzerbot.bot.BotApi;
+import com.halty.gramalyzerbot.i18n.Lang;
+import com.halty.gramalyzerbot.i18n.Tr;
 import com.halty.gramalyzerbot.bot.ui.Btn;
 import com.halty.gramalyzerbot.bot.ui.Cb;
 import com.halty.gramalyzerbot.bot.ui.Fmt;
@@ -10,9 +12,10 @@ import com.halty.gramalyzerbot.user.User;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.List;
 
-/** First-run experience, connecting a channel, channel switching and help. */
+/** First-run experience, connecting a channel, channel switching, help and the language picker. */
 @Component
 @RequiredArgsConstructor
 public class StartScreens {
@@ -20,76 +23,93 @@ public class StartScreens {
     private final BotApi gateway;
 
     public String welcomeCaption(User u) {
-        return "👋 <b>Hi " + Fmt.esc(u.displayName()) + "!</b> I'm <b>Gramalyzer</b>, your channel's analyst.\n\n"
-                + "I study how your posts perform and tell you\n"
-                + "⏰ <b>when</b> to publish\n"
-                + "💡 <b>what</b> to write about\n\n"
-                + "Everything is set up right here in chat. Ready?";
+        return Tr.t("start.caption", Fmt.esc(u.displayName()));
     }
 
     public View welcome() {
-        return View.of("Where would you like to start?")
-                .row(Btn.cb("➕ Connect my channel", "ch:connect"))
-                .row(Btn.cb("🎮 Try it with sample data", "ch:demo"), Btn.cb("❓ How it works", "help:home"));
+        return View.of(Tr.t("start.where"))
+                .row(Btn.cb(Tr.t("start.btn.connect"), "ch:connect"))
+                .row(Btn.cb(Tr.t("start.btn.track"), "wl:list"))
+                .row(Btn.cb(Tr.t("start.btn.demo"), "ch:demo"), Btn.cb(Tr.t("start.btn.how"), "help:home"))
+                .row(Btn.cb(Tr.t("btn.language"), "lang:home"));
     }
 
     public View connect() {
-        return View.of("➕ <b>Connect your channel</b>")
+        return View.of(Tr.t("start.connect.title"))
                 .blank()
-                .line("1️⃣ Tap the button below and pick your channel")
-                .line("2️⃣ Confirm – no special rights needed, I only read and <b>never post</b>")
-                .line("3️⃣ I'll message you here the moment I'm in")
+                .line(Tr.t("start.connect.step1"))
+                .line(Tr.t("start.connect.step2"))
+                .line(Tr.t("start.connect.step3"))
                 .blank()
-                .line("<i>By hand: channel → Administrators → Add Admin → @" + Fmt.esc(gateway.botUsername()) + "</i>")
+                .line(Tr.t("start.connect.by_hand", Fmt.esc(gateway.botUsername())))
                 .blank()
-                .line("Already added me? Tap <b>I've added it</b>, send the channel's <code>@username</code>, or forward me any post from it.")
-                .row(Btn.link("➕ Add me to a channel", "https://t.me/" + gateway.botUsername() + "?startchannel=true"))
-                .row(Btn.cb("✅ I've added it", "ch:check"))
-                .row(Btn.cb("‹ Back", "ch:list"));
+                .line(Tr.t("start.connect.already"))
+                .row(Btn.link(Tr.t("btn.add_to_channel"), "https://t.me/" + gateway.botUsername() + "?startchannel=true"))
+                .row(Btn.cb(Tr.t("start.btn.added"), "ch:check"))
+                .row(Btn.cb(Tr.t("btn.back"), "ch:list"));
     }
 
     public View connected(Channel ch) {
-        return View.of("🎉 <b>Connected to " + Fmt.esc(ch.getTitle()) + "!</b>")
+        return View.of(Tr.t("start.connected.title", Fmt.esc(ch.getTitle())))
                 .blank()
-                .line("From now on I record every new post and its reactions.")
-                .line("<b>Quick setup</b> (30 seconds):")
-                .row(Btn.cb("🌍 Set timezone", Cb.of("set:tz", ch.getId())), Btn.cb("📥 Import history", Cb.of("set:import", ch.getId())))
-                .row(Btn.cb("📊 Open dashboard", Cb.of("nav:home", ch.getId())));
+                .line(Tr.t("start.connected.recording"))
+                .line(Tr.t("start.connected.setup"))
+                .row(Btn.cb(Tr.t("start.btn.timezone"), Cb.of("set:tz", ch.getId())), Btn.cb(Tr.t("start.btn.import"), Cb.of("set:import", ch.getId())))
+                .row(Btn.cb(Tr.t("btn.open_dashboard"), Cb.of("nav:home", ch.getId())));
     }
 
     public View channels(List<Channel> mine, Long activeId, boolean botAdmin) {
-        View v = View.of("🔀 <b>Your channels</b>");
-        if (mine.isEmpty()) v.blank().line("You haven't connected a channel yet.");
+        View v = View.of(Tr.t("start.channels.title"));
+        if (mine.isEmpty()) v.blank().line(Tr.t("start.channels.none"));
         for (Channel c : mine) {
             String mark = c.getId().equals(activeId) ? "✅ " : "";
             String icon = c.isDemo() ? "🎮 " : c.isActive() ? "📺 " : "⚠️ ";
             v.row(Btn.cb(mark + icon + Fmt.trunc(c.getTitle(), 32), Cb.of("ch:pick", c.getId())));
         }
-        v.row(Btn.cb("➕ Connect a channel", "ch:connect"));
-        v.rowIf(mine.stream().noneMatch(Channel::isDemo), Btn.cb("🎮 Explore with sample data", "ch:demo"));
-        v.rowIf(botAdmin, Btn.cb("🛠 Admin panel", "adm:home"));
+        v.row(Btn.cb(Tr.t("start.btn.connect_another"), "ch:connect"));
+        v.row(Btn.cb(Tr.t("btn.watchlist"), "wl:list"));
+        v.rowIf(mine.stream().noneMatch(Channel::isDemo), Btn.cb(Tr.t("start.btn.explore"), "ch:demo"));
+        v.rowIf(botAdmin, Btn.cb(Tr.t("start.btn.admin"), "adm:home"));
         return v;
     }
 
     public View help(boolean hasChannel) {
-        View v = View.of("❓ <b>How Gramalyzer works</b>")
+        View v = View.of(Tr.t("help.title"))
                 .blank()
-                .line("<b>1 · Collect</b>")
-                .line("Once I'm an admin of your channel I record every new post with its reactions – and comments, if you link the discussion group. Want history from day one? Import a Telegram export.")
+                .line(Tr.t("help.collect.title"))
+                .line(Tr.t("help.collect"))
                 .blank()
-                .line("<b>2 · Analyse</b>")
-                .line("I compare posts by weekday, hour, format, length, topics and keywords, and shrink small samples so one lucky post doesn't look like a trend.")
+                .line(Tr.t("help.analyse.title"))
+                .line(Tr.t("help.analyse"))
                 .blank()
-                .line("<b>3 · Advise</b>")
-                .line("Best times, content ideas, a weekly digest and optional “now is a good time” nudges.")
+                .line(Tr.t("help.advise.title"))
+                .line(Tr.t("help.advise"))
                 .blank()
-                .line("<b>What I can't see</b>")
-                .line("Telegram doesn't give bots view counts, so “performance” means <b>reactions + comments</b>. Enable reactions on your channel for the best results.")
+                .line(Tr.t("help.watch.title"))
+                .line(Tr.t("help.watch"))
                 .blank()
-                .line("<b>Team</b>")
-                .line("👑 Owner – everything · 🛡 Admin – settings &amp; moderators · 🔎 Moderator – insights, tag or exclude posts.")
+                .line(Tr.t("help.cant_see.title"))
+                .line(Tr.t("help.cant_see"))
                 .blank()
-                .line("<i>Tip: the buttons under the chat box jump straight to the main screens.</i>");
-        return v.row(Btn.cb(hasChannel ? "‹ Back to dashboard" : "‹ Back", hasChannel ? "nav:active" : "ch:list"));
+                .line(Tr.t("help.team.title"))
+                .line(Tr.t("help.team"))
+                .blank()
+                .line(Tr.t("help.tip"));
+        return v.row(Btn.cb(hasChannel ? Tr.t("help.back_dashboard") : Tr.t("btn.back"), hasChannel ? "nav:active" : "ch:list"));
+    }
+
+    /** The language picker; the current language is ticked. */
+    public View languages(Lang current) {
+        View v = View.of(Tr.t("lang.title")).blank().line(Tr.t("lang.hint"));
+        List<Btn> row = new ArrayList<>();
+        for (Lang l : Lang.values()) {
+            row.add(Btn.cb((l == current ? "✅ " : "") + l.label(), Cb.of("lang:set", l.code())));
+            if (row.size() == 2) {
+                v.row(row.toArray(new Btn[0]));
+                row.clear();
+            }
+        }
+        if (!row.isEmpty()) v.row(row.toArray(new Btn[0]));
+        return v.row(Btn.cb(Tr.t("lang.auto"), "lang:set:auto"), Btn.cb(Tr.t("btn.back"), "nav:active"));
     }
 }

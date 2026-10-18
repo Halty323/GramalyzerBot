@@ -1,5 +1,6 @@
 package com.halty.gramalyzerbot.bot.screen;
 
+import com.halty.gramalyzerbot.i18n.Tr;
 import com.halty.gramalyzerbot.bot.ui.*;
 import com.halty.gramalyzerbot.channel.Channel;
 import com.halty.gramalyzerbot.channel.ChannelService;
@@ -25,58 +26,58 @@ public class AdminScreens {
 
     public View home() {
         boolean open = settings.publicRegistration();
-        return new View().line("🛠 <b>Admin panel</b>").line(Fmt.rule())
-                .line("👥 Users: <b>" + Fmt.num(users.count()) + "</b> · 🚫 banned: <b>" + users.bannedCount() + "</b>")
-                .line("📺 Connected channels: <b>" + Fmt.num(channels.count()) + "</b>")
-                .line("🔓 Who may connect channels: <b>" + (open ? "anyone" : "invited people only") + "</b>")
-                .row(Btn.cb("👥 Users", "adm:users:0"), Btn.cb("📺 Channels", "adm:chs:0"))
-                .row(Btn.cb(open ? "🔒 Close registration" : "🔓 Open registration", "adm:reg"))
-                .row(Btn.cb("🚫 Ban by Telegram ID", "adm:banask"))
-                .row(Btn.cb("‹ Back", "ch:list"));
+        return new View().line(Tr.t("adm.title")).line(Fmt.rule())
+                .line(Tr.t("adm.users_line", Fmt.num(users.count()), users.bannedCount()))
+                .line(Tr.t("adm.channels_line", Fmt.num(channels.count())))
+                .line(Tr.t("adm.who_line", Tr.t(open ? "adm.anyone" : "adm.invited")))
+                .row(Btn.cb(Tr.t("adm.btn.users"), "adm:users:0"), Btn.cb(Tr.t("adm.btn.channels"), "adm:chs:0"))
+                .row(Btn.cb(Tr.t(open ? "adm.btn.close" : "adm.btn.open"), "adm:reg"))
+                .row(Btn.cb(Tr.t("adm.btn.ban"), "adm:banask"))
+                .row(Btn.cb(Tr.t("btn.back"), "ch:list"));
     }
 
     public View users(int page) {
         List<User> list = users.page(page, PAGE);
-        View v = new View().line("👥 <b>Users</b> · page " + (page + 1));
-        if (list.isEmpty()) v.blank().line("No more users.");
+        View v = new View().line(Tr.t("adm.users_title", page + 1));
+        if (list.isEmpty()) v.blank().line(Tr.t("adm.no_users"));
         for (User u : list) {
             v.row(Btn.cb((u.isBanned() ? "🚫 " : u.isBotAdmin() ? "🛠 " : "👤 ") + Fmt.trunc(u.displayName(), 24)
                     + " · " + Fmt.ago(u.getLastSeenAt(), Instant.now()), "adm:user:" + u.getTelegramId()));
         }
         List<Btn> nav = new java.util.ArrayList<>();
-        if (page > 0) nav.add(Btn.cb("‹ Prev", "adm:users:" + (page - 1)));
-        if (list.size() == PAGE) nav.add(Btn.cb("Next ›", "adm:users:" + (page + 1)));
+        if (page > 0) nav.add(Btn.cb(Tr.t("btn.prev"), "adm:users:" + (page - 1)));
+        if (list.size() == PAGE) nav.add(Btn.cb(Tr.t("btn.next"), "adm:users:" + (page + 1)));
         v.row(nav.toArray(new Btn[0]));
-        return v.row(Btn.cb("‹ Admin panel", "adm:home"));
+        return v.row(Btn.cb(Tr.t("adm.btn.back"), "adm:home"));
     }
 
     public View user(User u) {
         View v = new View().line("👤 <b>" + Fmt.esc(u.displayName()) + "</b>")
                 .line("ID: <code>" + u.getTelegramId() + "</code>" + (u.getUsername() != null ? " · @" + Fmt.esc(u.getUsername()) : ""))
-                .line("Joined " + Fmt.ago(u.getCreatedAt(), Instant.now()) + " · last seen " + Fmt.ago(u.getLastSeenAt(), Instant.now()))
-                .line(u.isBanned() ? "Status: 🚫 banned" : u.isBotAdmin() ? "Status: 🛠 bot admin" : "Status: ✅ active");
+                .line(Tr.t("adm.user_seen", Fmt.ago(u.getCreatedAt(), Instant.now()), Fmt.ago(u.getLastSeenAt(), Instant.now())))
+                .line(Tr.t(u.isBanned() ? "adm.status.banned" : u.isBotAdmin() ? "adm.status.admin" : "adm.status.active"));
         if (!u.isBotAdmin()) {
-            v.row(u.isBanned() ? Btn.cb("✅ Unban", "adm:unban:" + u.getTelegramId()) : Btn.cb("🚫 Ban", "adm:ban:" + u.getTelegramId()));
+            v.row(u.isBanned() ? Btn.cb(Tr.t("adm.btn.unban"), "adm:unban:" + u.getTelegramId()) : Btn.cb(Tr.t("adm.btn.do_ban"), "adm:ban:" + u.getTelegramId()));
         }
-        return v.row(Btn.cb("‹ Users", "adm:users:0"));
+        return v.row(Btn.cb(Tr.t("adm.btn.users_back"), "adm:users:0"));
     }
 
     public View channels(int page) {
         List<Channel> list = channels.page(page, PAGE);
-        View v = new View().line("📺 <b>Channels</b> · page " + (page + 1));
-        if (list.isEmpty()) v.blank().line("No more channels.");
+        View v = new View().line(Tr.t("adm.channels_title", page + 1));
+        if (list.isEmpty()) v.blank().line(Tr.t("adm.no_channels"));
         for (Channel c : list)
             v.row(Btn.cb((c.isDemo() ? "🎮 " : c.isActive() ? "📺 " : "⚠️ ") + Fmt.trunc(c.getTitle(), 30), "nav:home:" + c.getId()));
         List<Btn> nav = new java.util.ArrayList<>();
-        if (page > 0) nav.add(Btn.cb("‹ Prev", "adm:chs:" + (page - 1)));
-        if (list.size() == PAGE) nav.add(Btn.cb("Next ›", "adm:chs:" + (page + 1)));
+        if (page > 0) nav.add(Btn.cb(Tr.t("btn.prev"), "adm:chs:" + (page - 1)));
+        if (list.size() == PAGE) nav.add(Btn.cb(Tr.t("btn.next"), "adm:chs:" + (page + 1)));
         v.row(nav.toArray(new Btn[0]));
-        return v.row(Btn.cb("‹ Admin panel", "adm:home"));
+        return v.row(Btn.cb(Tr.t("adm.btn.back"), "adm:home"));
     }
 
     public View banPrompt() {
-        return new View().line("🚫 <b>Ban a user</b>").blank()
-                .line("Send me the person's numeric Telegram ID. They'll be locked out of the bot (their channels stay as they are).")
-                .row(Btn.cb("✖ Cancel", "adm:home"));
+        return new View().line(Tr.t("adm.ban_title")).blank()
+                .line(Tr.t("adm.ban_hint"))
+                .row(Btn.cb(Tr.t("btn.cancel"), "adm:home"));
     }
 }

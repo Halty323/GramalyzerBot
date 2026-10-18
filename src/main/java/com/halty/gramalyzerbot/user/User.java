@@ -39,8 +39,12 @@ public class User {
     @Column(nullable = false)
     private boolean banned;
 
+    /** The language the person's Telegram app reports, e.g. "pt-br". */
     @Column(name = "language_code")
     private String languageCode;
+
+    /** The bot's language the person picked themselves (a {@code Lang} code); null to follow {@link #languageCode}. */
+    private String language;
 
     /** The channel the person is currently looking at. */
     @Column(name = "active_channel_id")

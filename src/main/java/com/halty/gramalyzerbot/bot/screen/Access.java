@@ -45,6 +45,6 @@ public class Access {
     }
 
     public Role roleOf(User u, Channel ch) {
-        return membership.roleOf(ch, u).orElseThrow(() -> new com.halty.gramalyzerbot.common.UserFacingException("🔒 You don't have access to this channel."));
+        return membership.roleOf(ch, u).orElseThrow(() -> new com.halty.gramalyzerbot.common.UserFacingException("err.no_access"));
     }
 }

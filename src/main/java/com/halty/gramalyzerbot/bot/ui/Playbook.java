@@ -2,6 +2,7 @@ package com.halty.gramalyzerbot.bot.ui;
 
 import com.halty.gramalyzerbot.analytics.Report;
 import com.halty.gramalyzerbot.analytics.Report.Group;
+import com.halty.gramalyzerbot.i18n.Tr;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -19,7 +20,7 @@ public final class Playbook {
         if (r.eligible() < 10 || !r.hasSignal()) return out;
 
         if (!r.topSlots().isEmpty()) {
-            StringBuilder sb = new StringBuilder("⏰ <b>Post on</b> ");
+            StringBuilder sb = new StringBuilder(Tr.t("playbook.post_on")).append(' ');
             int n = Math.min(3, r.topSlots().size());
             for (int i = 0; i < n; i++) {
                 Report.Slot s = r.topSlots().get(i);
@@ -28,19 +29,19 @@ public final class Playbook {
             }
             out.add(sb.toString());
         }
-        best(r.kinds()).ifPresent(g -> out.add("🎯 <b>Format:</b> " + Labels.kind(g.key()) + " (" + Fmt.lift(g.lift()) + ")"));
+        best(r.kinds()).ifPresent(g -> out.add(Tr.t("playbook.format") + " " + Labels.kind(g.key()) + " (" + Fmt.lift(g.lift()) + ")"));
         List<Group> winners = r.topics().stream().filter(g -> g.lift() >= WIN).limit(2).toList();
         if (!winners.isEmpty()) {
-            StringBuilder sb = new StringBuilder("🏷 <b>Topics:</b> ");
+            StringBuilder sb = new StringBuilder(Tr.t("playbook.topics")).append(' ');
             for (int i = 0; i < winners.size(); i++) {
                 if (i > 0) sb.append(" · ");
                 sb.append(Labels.topic(winners.get(i).key())).append(" (").append(Fmt.lift(winners.get(i).lift())).append(')');
             }
             out.add(sb.toString());
         }
-        best(r.lengths()).ifPresent(g -> out.add("📏 <b>Length:</b> " + Labels.length(g.key()) + " (" + Fmt.lift(g.lift()) + ")"));
+        best(r.lengths()).ifPresent(g -> out.add(Tr.t("playbook.length") + " " + Labels.length(g.key()) + " (" + Fmt.lift(g.lift()) + ")"));
         r.topics().stream().filter(g -> g.lift() <= LOSE).min(Comparator.comparingDouble(Group::lift))
-                .ifPresent(g -> out.add("🧊 <b>Go easier on:</b> " + Labels.topic(g.key()) + " (" + Fmt.lift(g.lift()) + ")"));
+                .ifPresent(g -> out.add(Tr.t("playbook.easier") + " " + Labels.topic(g.key()) + " (" + Fmt.lift(g.lift()) + ")"));
         return out;
     }
 

@@ -7,8 +7,6 @@ import java.util.List;
 /** Weekday × time-of-day grid drawn with coloured squares (2-hour columns), meant for a &lt;pre&gt; block. */
 public final class Heatmap {
 
-    public static final String LEGEND = "⬜ no data · 🟥 weak · 🟧 below avg · 🟨 average · 🟩 strong";
-
     private Heatmap() {}
 
     public static String render(double[][] lift, int[][] posts) {
@@ -36,7 +34,7 @@ public final class Heatmap {
         sb.setLength(sb.toString().stripTrailing().length());
         sb.append('\n');
         for (int d = 0; d < 7; d++) {
-            sb.append(Fmt.dayShort(DayOfWeek.of(d + 1))).append(' ');
+            sb.append(pad(Fmt.dayShort(DayOfWeek.of(d + 1)))).append(' ');
             for (int b = 0; b < 12; b++) {
                 if (!has[d][b]) sb.append("⬜");
                 else if (flat) sb.append("🟨");
@@ -45,6 +43,16 @@ public final class Heatmap {
             if (d < 6) sb.append('\n');
         }
         return sb.toString();
+    }
+
+    /** The colour key, in the current language. */
+    public static String legend() { return com.halty.gramalyzerbot.i18n.Tr.t("heatmap.legend"); }
+
+    /** Day names are padded to three characters so the grid lines up in any language. */
+    private static String pad(String day) {
+        int n = day.codePointCount(0, day.length());
+        if (n >= 3) return day.substring(0, day.offsetByCodePoints(0, 3));
+        return day + " ".repeat(3 - n);
     }
 
     /** Range-scaled colour; a cell is only "strong" if above typical (1.0) and only "weak" if below it. */
