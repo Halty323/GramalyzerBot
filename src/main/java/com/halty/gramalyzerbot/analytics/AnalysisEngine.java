@@ -229,23 +229,42 @@ public final class AnalysisEngine {
         return new Group(key, m, Math.exp(shrunk - mu), ss / m);
     }
 
+    /** A word must appear in at least this many of {@code n} posts to be judged. */
+    public static int minKeywordPosts(int n) { return Math.max(4, (int) Math.ceil(0.02 * n)); }
+
+    /** The spelling used most often; ties go to the shorter, then alphabetically first one. */
+    private static String commonestForm(Map<String, Integer> counts) {
+        return counts.entrySet().stream()
+                .min(Comparator.<Map.Entry<String, Integer>>comparingInt(e -> -e.getValue())
+                        .thenComparingInt(e -> e.getKey().length())
+                        .thenComparing(Map.Entry::getKey))
+                .orElseThrow().getKey();
+    }
+
     private static List<Group> keywordGroups(List<Sample> use, double[] v, double[] score, double mu) {
         int n = use.size();
+        // posts per word stem, and how often each spelling of that stem occurs (the commonest one is shown)
         Map<String, List<Integer>> df = new HashMap<>();
+        Map<String, Map<String, Integer>> forms = new HashMap<>();
         for (int i = 0; i < n; i++) {
             Sample s = use.get(i);
-            Set<String> own = new HashSet<>(s.topics());
+            Set<String> own = new HashSet<>();
+            for (String t : s.topics()) own.add(TextFeatures.stem(t));
+            Set<String> seen = new HashSet<>();
             for (String kw : TextFeatures.keywords(s.text())) {
-                if (!own.contains(kw)) df.computeIfAbsent(kw, x -> new ArrayList<>()).add(i);
+                String st = TextFeatures.stem(kw);
+                if (own.contains(st)) continue;
+                forms.computeIfAbsent(st, x -> new HashMap<>()).merge(kw, 1, Integer::sum);
+                if (seen.add(st)) df.computeIfAbsent(st, x -> new ArrayList<>()).add(i);
             }
         }
-        int min = Math.max(4, (int) Math.ceil(0.02 * n)), max = (int) Math.floor(0.4 * n);
+        int min = minKeywordPosts(n), max = (int) Math.floor(0.4 * n);
         // words that always appear together (a repeated phrase) say the same thing: keep the longest one
         Map<List<Integer>, String> representative = new HashMap<>();
         for (Map.Entry<String, List<Integer>> e : df.entrySet()) {
             int c = e.getValue().size();
             if (c < min || c > max) continue;
-            representative.merge(e.getValue(), e.getKey(),
+            representative.merge(e.getValue(), commonestForm(forms.get(e.getKey())),
                     (a, b) -> a.length() != b.length() ? (a.length() > b.length() ? a : b) : (a.compareTo(b) <= 0 ? a : b));
         }
         List<Group> out = new ArrayList<>();

@@ -193,7 +193,12 @@ public class InsightScreens {
         }
         List<Group> kws = r.keywords();
         if (kws.isEmpty()) {
-            v.blank().line("<b>🔤 Words</b>").line("<i>Word analysis starts at " + AnalysisEngine.MIN_POSTS_FOR_KEYWORDS + " posts.</i>");
+            v.blank().line("<b>🔤 Words</b>");
+            if (r.eligible() < AnalysisEngine.MIN_POSTS_FOR_KEYWORDS)
+                v.line("<i>Word analysis starts at " + AnalysisEngine.MIN_POSTS_FOR_KEYWORDS + " posts – " + r.eligible() + " so far.</i>");
+            else
+                v.line("<i>No word stands out yet: none shows up in enough posts (" + AnalysisEngine.minKeywordPosts(r.eligible())
+                        + "+) with a clearly different response. Posts with more text, or more posts, will bring them out.</i>");
         } else {
             List<Group> win = kws.stream().filter(g -> g.lift() > 1).limit(8).toList();
             List<Group> lose = kws.stream().filter(g -> g.lift() < 1).sorted(Comparator.comparingDouble(Group::lift)).limit(5).toList();

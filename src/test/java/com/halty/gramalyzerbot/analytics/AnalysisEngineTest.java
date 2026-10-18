@@ -70,6 +70,24 @@ class AnalysisEngineTest {
     }
 
     @Test
+    void inflectedFormsOfAWordCountTogether() {
+        // Russian rarely repeats a word in exactly the same form: посылка / посылки / посылку / посылками
+        String[] forms = {"посылка", "посылки", "посылку", "посылками", "посылке"};
+        List<Sample> posts = new ArrayList<>();
+        for (int i = 0; i < 60; i++) {
+            boolean parcel = i % 4 == 0; // 15 posts, but each spelling only 3 times: too rare on its own
+            String text = parcel ? "Сегодня " + forms[i / 4 % forms.length] + " для вас" : "Сегодня заметка " + i;
+            posts.add(new Sample(i + 1, i + 1, NOW.minus(Duration.ofDays(i + 2)), PostKind.TEXT, text, false,
+                    List.of(), parcel ? 60 : 10, 0, false, false, null));
+        }
+        Report r = new AnalysisEngine().analyze(posts, opts(Metric.REACTIONS, 0));
+        Group parcel = r.keywords().stream().filter(g -> g.key().startsWith("посылк")).findFirst().orElse(null);
+        assertNotNull(parcel, "keywords " + r.keywords());
+        assertEquals(15, parcel.posts());
+        assertTrue(parcel.lift() > 1.5, "lift " + parcel.lift());
+    }
+
+    @Test
     void windowLimitsPosts() {
         Report all = new AnalysisEngine().analyze(demo(300), opts(Metric.ENGAGEMENT, 0));
         Report w30 = new AnalysisEngine().analyze(demo(300), opts(Metric.ENGAGEMENT, 30));
