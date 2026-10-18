@@ -43,6 +43,16 @@ public final class TextFeatures {
      * are not filtered here – the engine drops words that appear in too many posts, which works for
      * any language.
      */
+    /**
+     * A crude, language-independent stem: the first six letters of longer words. Inflected forms – "посылка",
+     * "посылки", "посылками", or "update", "updates", "updated" – then count as one word, which matters for
+     * languages like Russian, where the same word rarely repeats in exactly the same form.
+     */
+    public static String stem(String word) {
+        String w = word.toLowerCase(Locale.ROOT);
+        return w.codePointCount(0, w.length()) <= 6 ? w : w.substring(0, w.offsetByCodePoints(0, 6));
+    }
+
     public static Set<String> keywords(String text) {
         Set<String> out = new LinkedHashSet<>();
         if (text == null || text.isBlank()) return out;
