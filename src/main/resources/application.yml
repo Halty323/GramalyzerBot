@@ -1,0 +1,34 @@
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:h2:file:./.data/gramalyzer;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE}
+    username: ${SPRING_DATASOURCE_USERNAME:sa}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+  web:
+    resources:
+      static-locations: ${GRAMALYZER_WEB_ROOT:file:../GramalyzerVibe/dist/}
+server:
+  port: ${PORT:8080}
+  address: ${HOST:127.0.0.1}
+  forward-headers-strategy: framework
+telegram:
+  bot:
+    enabled: ${TELEGRAM_BOT_ENABLED:false}
+    # Get it from @BotFather and provide it as an environment variable – never commit it.
+    token: ${TELEGRAM_BOT_TOKEN:}
+    # Bot administrators (they can open /admin in the bot): comma-separated @usernames and/or numeric user ids,
+    # e.g. "@halty,123456789". Optional: if empty, the bot prints a one-time "/claim CODE" in the log at startup
+    # so the first person can claim it. BOT_ADMIN_IDS is still read as the old name of this setting.
+    admins: ${BOT_ADMINS:${BOT_ADMIN_IDS:}}
+    # Initial value of "anyone may connect a channel". Can be switched at runtime from /admin.
+    public-registration: ${BOT_PUBLIC_REGISTRATION:true}
+    # Timezone given to newly connected channels until their owner (or the CRM) sets one.
+    default-timezone: ${BOT_DEFAULT_TIMEZONE:UTC}
+gramalyzer:
+  demo: ${DEMO_MODE:false}
+  api-token: ${GRAMALYZER_API_TOKEN:}
