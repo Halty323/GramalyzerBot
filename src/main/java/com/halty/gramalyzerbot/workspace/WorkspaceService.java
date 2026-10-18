@@ -49,6 +49,10 @@ public class WorkspaceService {
             previous == null || previous.notifications(), previous != null && previous.autoDelete(), previous == null ? "" : previous.signature(), chatId);
         return store.saveChannel(c);
     }
+    /** Latest member count from Telegram, for a channel the CRM knows. */
+    public void recordSubscribers(long chatId, long count) {store.telegramChannel(chatId).ifPresent(c -> store.recordSubscribers(c.id(), count));}
+    /** Latest reaction total of one channel message. */
+    public void recordReactions(long chatId, long messageId, long reactions) {store.telegramChannel(chatId).ifPresent(c -> store.recordReactions(c.id(), messageId, reactions));}
     public void channelPost(long chatId, int messageId, String text, long timestamp) {
         Channel c = store.telegramChannel(chatId).orElse(null); if (c == null) return;
         String id = "telegram:"+chatId+":"+messageId; if (store.post(id).isPresent() || store.hasReceipt(c.id(),messageId)) return;

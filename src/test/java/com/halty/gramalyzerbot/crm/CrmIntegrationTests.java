@@ -108,6 +108,17 @@ class CrmIntegrationTests {
     }
 
     @Test
+    void reactionAndMemberCountsFromTelegramShowUpOnTheWebsite() {
+        workspace.channelPost(CHAT, 77, "Hello channel", Instant.now().getEpochSecond());
+        workspace.recordReactions(CHAT, 77, 42);
+        workspace.recordReactions(CHAT, 999, 5); // a message the CRM never saw: ignored
+        workspace.recordSubscribers(CHAT, 1234);
+        assertThat(workspace.post("telegram:" + CHAT + ":77").reactions()).isEqualTo(42);
+        assertThat(workspace.post("telegram:" + CHAT + ":77").status()).isEqualTo("published");
+        assertThat(workspace.channel(crm.id()).subscribers()).isEqualTo(1234);
+    }
+
+    @Test
     void timezoneChangesOnEitherSideReachTheOther() throws Exception {
         Channel ch = bridge.link(channels.register(CHAT, "Analytics test", "analytics_test", 1000));
         assertThat(ch.getWorkspaceChannelId()).isEqualTo(crm.id());

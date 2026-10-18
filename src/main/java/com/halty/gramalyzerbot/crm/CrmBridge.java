@@ -57,7 +57,13 @@ public class CrmBridge {
                     && Boolean.TRUE.equals(admin.getCanPostMessages());
             String title = chat.getTitle() == null || chat.getTitle().isBlank() ? "Channel " + chat.getId() : chat.getTitle();
             workspace.registerChannel(chat.getId(), title, chat.getUserName(), canPost);
+            countSubscribers(chat.getId());
             channels.byChatId(chat.getId()).ifPresent(this::link);
+        } else if (update.getMessageReactionCount() != null) {
+            var rc = update.getMessageReactionCount();
+            long total = 0;
+            if (rc.getReactions() != null) for (var r : rc.getReactions()) total += r.getTotalCount() == null ? 0 : r.getTotalCount();
+            workspace.recordReactions(rc.getChat().getId(), rc.getMessageId(), total);
         } else if (update.hasChannelPost()) {
             var post = update.getChannelPost();
             workspace.channelPost(post.getChatId(), post.getMessageId(),
@@ -66,6 +72,11 @@ public class CrmBridge {
     }
 
     // ------------------------------------------------------------------ linking
+
+    /** A newly seen channel shows its real member count straight away instead of 0 until the hourly refresh. */
+    private void countSubscribers(long chatId) {
+        bot.memberCount(chatId).ifPresent(n -> workspace.recordSubscribers(chatId, n));
+    }
 
     /** Points the analytics channel at its CRM twin (matched by chat id), if the CRM knows the channel. */
     public Channel link(Channel ch) {
@@ -84,6 +95,7 @@ public class CrmBridge {
         try {
             if (workspace.byTelegramChat(ch.getTelegramChatId()).isEmpty()) {
                 workspace.registerChannel(ch.getTelegramChatId(), ch.getTitle(), ch.getUsername(), bot.canPostTo(ch.getTelegramChatId()));
+                countSubscribers(ch.getTelegramChatId());
             }
             return link(ch);
         } catch (RuntimeException e) {

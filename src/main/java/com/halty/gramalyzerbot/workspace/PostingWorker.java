@@ -22,7 +22,8 @@ public class PostingWorker {
     @org.springframework.beans.factory.annotation.Autowired
     public PostingWorker(WorkspaceStore store,ObjectProvider<TelegramGateway> gateway,@Value("${telegram.bot.enabled:false}") boolean enabled,@Value("${gramalyzer.demo:false}") boolean demo) {this.store=store;this.gateway=gateway.getIfAvailable();this.enabled=enabled&&!demo;}
     public PostingWorker(WorkspaceStore store,TelegramGateway gateway) {this.store=store;this.gateway=gateway;this.enabled=true;this.ready=true;}
-    @EventListener(ApplicationReadyEvent.class) public void recover() {if(enabled) store.recoverInterrupted(); ready=true;}
+    /** On startup: settle interrupted deliveries, then read member counts now rather than an hour from now. */
+    @EventListener(ApplicationReadyEvent.class) public void recover() {if(enabled) store.recoverInterrupted(); ready=true; refreshSubscribers();}
     @Scheduled(fixedDelayString="${gramalyzer.delivery-interval-ms:15000}") public void tick() {
         if(!enabled||!ready||gateway==null) return;
         for(Post post:store.due()) {
