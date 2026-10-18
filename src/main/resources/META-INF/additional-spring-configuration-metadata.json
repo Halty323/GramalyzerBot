@@ -11,9 +11,9 @@
       "description": "Bot token from @BotFather. Provide via the TELEGRAM_BOT_TOKEN environment variable."
     },
     {
-      "name": "telegram.bot.admin-ids",
-      "type": "java.util.List<java.lang.Long>",
-      "description": "Telegram user ids that are bot administrators."
+      "name": "telegram.bot.admins",
+      "type": "java.util.List<java.lang.String>",
+      "description": "Bot administrators: Telegram @usernames and/or numeric user ids."
     },
     {
       "name": "telegram.bot.public-registration",

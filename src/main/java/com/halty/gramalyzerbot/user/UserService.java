@@ -35,7 +35,7 @@ public class UserService {
         u.setFirstName(firstName);
         u.setLanguageCode(languageCode);
         u.setLastSeenAt(Instant.now());
-        if (props.adminIds().contains(telegramId)) u.setBotAdmin(true);
+        if (props.isAdmin(telegramId, username)) u.setBotAdmin(true);
         return users.save(u);
     }
 
@@ -86,7 +86,7 @@ public class UserService {
         });
     }
 
-    public boolean anyBotAdmin() { return !props.adminIds().isEmpty() || !users.findAllByBotAdminTrue().isEmpty(); }
+    public boolean anyBotAdmin() { return !props.admins().isEmpty() || !users.findAllByBotAdminTrue().isEmpty(); }
 
     public long count() { return users.count(); }
 

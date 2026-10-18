@@ -21,9 +21,10 @@ telegram:
     enabled: ${TELEGRAM_BOT_ENABLED:false}
     # Get it from @BotFather and provide it as an environment variable – never commit it.
     token: ${TELEGRAM_BOT_TOKEN:}
-    # Comma-separated Telegram user ids that are bot administrators (they can open /admin in the bot). Optional:
-    # if empty, the bot prints a one-time "/claim CODE" in the log at startup so the first person can claim it.
-    admin-ids: ${BOT_ADMIN_IDS:}
+    # Bot administrators (they can open /admin in the bot): comma-separated @usernames and/or numeric user ids,
+    # e.g. "@halty,123456789". Optional: if empty, the bot prints a one-time "/claim CODE" in the log at startup
+    # so the first person can claim it. BOT_ADMIN_IDS is still read as the old name of this setting.
+    admins: ${BOT_ADMINS:${BOT_ADMIN_IDS:}}
     # Initial value of "anyone may connect a channel". Can be switched at runtime from /admin.
     public-registration: ${BOT_PUBLIC_REGISTRATION:true}
     # Timezone given to newly connected channels until their owner (or the CRM) sets one.
