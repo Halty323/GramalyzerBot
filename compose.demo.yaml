@@ -1,0 +1,24 @@
+name: gramalyzer-demo
+
+# Demo: sample channels, posts and analytics; Telegram is never contacted and nothing needs configuring.
+#
+#   docker compose -f compose.demo.yaml up --build      → http://localhost:8080
+#
+# Needs the GramalyzerVibe checkout next to this one (../GramalyzerVibe), or set GRAMALYZER_VIBE_DIR.
+
+services:
+  demo:
+    build:
+      context: .
+      additional_contexts:
+        vibe: ${GRAMALYZER_VIBE_DIR:-../GramalyzerVibe}
+    image: gramalyzer:local
+    environment:
+      SPRING_PROFILES_ACTIVE: demo
+    volumes:
+      - demo-data:/app/.data
+    ports:
+      - "127.0.0.1:8080:8080"
+
+volumes:
+  demo-data:

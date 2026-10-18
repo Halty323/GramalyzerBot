@@ -27,6 +27,25 @@ mvn spring-boot:run -Dspring-boot.run.profiles=demo
 
 The demo profile never starts Telegram polling or sends posts. It uses a separate H2 database under `.data/demo`. Its sample channels (`design`, `tech`, `makers`) get sample analytics the first time the website asks for their insights.
 
+### Docker
+
+One image holds the backend and the website: Spring serves the built website, so everything is on port 8080. Check out GramalyzerVibe next to this repository, as for local development. Then:
+
+```sh
+# demo: sample data, Telegram off, nothing to configure
+docker compose -f compose.demo.yaml up --build          # → http://localhost:8080
+
+# live: PostgreSQL + bot + website
+cp .env.example .env                                    # set POSTGRES_PASSWORD, GRAMALYZER_API_TOKEN, and the Telegram settings
+docker compose up -d --build                            # → http://localhost:8080
+docker compose logs -f app                              # first start: look for "/claim CODE" if BOT_ADMIN_IDS is empty
+```
+
+* **Data:** the live database lives in the `db-data` volume; the demo's H2 files live in `demo-data`.
+* **Port:** it is bound to `127.0.0.1` only. To expose it, put a reverse proxy with HTTPS in front. Spring honours `X-Forwarded-*` headers, so the session cookie is marked `Secure` behind HTTPS.
+* **Updates:** `git pull` in both checkouts, then `docker compose up -d --build`. Flyway migrates the database on start.
+* **Tests:** the image build skips them (`-DskipTests`); run `mvn test` or CI before deploying.
+
 ### Live configuration (environment variables)
 
 | Variable | Required | Meaning |
