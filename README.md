@@ -46,6 +46,17 @@ docker compose logs -f app                              # first start: look for 
 * **Updates:** `git pull` in both checkouts, then `docker compose up -d --build`. Flyway migrates the database on start.
 * **Tests:** the image build skips them (`-DskipTests`); run `mvn test` or CI before deploying.
 
+### Configuration files
+
+Built-in defaults live in `src/main/resources/gramalyzer-defaults.properties`, and every value there can be set through an environment variable. For your own settings, create `src/main/resources/application.yml`; it is git-ignored and overrides any default.
+
+It is also left out of Docker images, so containers are configured only through `.env` and environment variables. Precedence, lowest first:
+
+1. defaults
+2. your `application.yml`, then `application-demo.yml` when the demo profile is active
+3. environment variables
+4. command-line arguments
+
 ### Live configuration (environment variables)
 
 | Variable | Required | Meaning |
