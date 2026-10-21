@@ -10,6 +10,8 @@ The shared Java 21 / Spring Boot backend behind the Gramalyzer admin website ([G
 | **Public channel tracking** | `tracking` | Watchlists of public channels nobody had to add the bot to, for both the website and the bot: subscribers, average views, engagement rate, posting rhythm, top posts and subscriber history, read from Telegram's public web preview. |
 | **Languages** | `i18n` | The bot speaks English, Russian, Ukrainian, Hindi, Indonesian, Portuguese, Spanish, Arabic, Persian, Uzbek, Turkish and Vietnamese. |
 
+**Gramalyzer Studio**, a native desktop client for Windows, macOS and Linux written in Rust, lives in [`desktop/`](desktop/README.md). It uses the same API and token as the website and adds AI writing tools.
+
 ## Run it
 
 With the UI from the sibling GramalyzerVibe checkout:
