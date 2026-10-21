@@ -5,6 +5,9 @@ import com.halty.gramalyzerbot.i18n.Tr;
 import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.time.format.FormatStyle;
 import java.time.format.TextStyle;
 import java.util.List;
 import java.util.Locale;
@@ -92,6 +95,11 @@ public final class Fmt {
         if (d.toMinutes() < 60) return Tr.t("fmt.minutes_ago", d.toMinutes());
         if (d.toHours() < 48) return Tr.t("fmt.hours_ago", d.toHours());
         return Tr.t("fmt.days_ago", d.toDays());
+    }
+
+    /** A calendar date in the reader's language, e.g. "21 Nov 2026" (UTC). */
+    public static String date(Instant t) {
+        return DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(Tr.locale()).format(t.atZone(ZoneOffset.UTC));
     }
 
     public static String rule() { return "━━━━━━━━━━━━━━━━"; }

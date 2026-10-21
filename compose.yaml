@@ -41,6 +41,9 @@ services:
       BOT_ADMINS: ${BOT_ADMINS:-${BOT_ADMIN_IDS:-}}
       BOT_PUBLIC_REGISTRATION: ${BOT_PUBLIC_REGISTRATION:-true}
       BOT_DEFAULT_TIMEZONE: ${BOT_DEFAULT_TIMEZONE:-UTC}
+      BILLING_ENABLED: ${BILLING_ENABLED:-true}
+      BILLING_CREATOR_STARS: ${BILLING_CREATOR_STARS:-250}
+      BILLING_PRO_STARS: ${BILLING_PRO_STARS:-750}
     ports:
       # Only reachable from this machine. Put a reverse proxy with HTTPS in front before exposing it.
       - "127.0.0.1:8080:8080"

@@ -1,6 +1,7 @@
 package com.halty.gramalyzerbot.bot.screen;
 
 import com.halty.gramalyzerbot.analytics.AnalysisEngine;
+import com.halty.gramalyzerbot.billing.BillingService;
 import com.halty.gramalyzerbot.analytics.Report;
 import com.halty.gramalyzerbot.i18n.Tr;
 import com.halty.gramalyzerbot.bot.ui.*;
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 
 /** The dashboard: numbers, the playbook, setup progress and navigation. */
 @Component
@@ -27,8 +29,12 @@ public class HomeScreen {
     private final AnalysisService analysis;
     private final SubscriberService subscribers;
     private final PostService posts;
+    private final BillingService billing;
+    private final PlanScreens plans;
 
     public View render(Channel ch, Role role) {
+        OptionalInt paused = billing.pausedLimit(ch);
+        if (paused.isPresent()) return plans.paused(ch, paused.getAsInt());
         Instant now = Instant.now();
         Report r = analysis.report(ch);
         SubscriberService.Growth g = subscribers.growth(ch, 30);

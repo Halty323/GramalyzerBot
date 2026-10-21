@@ -1,5 +1,6 @@
 package com.halty.gramalyzerbot.bot.flow;
 
+import com.halty.gramalyzerbot.billing.BillingService;
 import com.halty.gramalyzerbot.bot.BotApi;
 import com.halty.gramalyzerbot.bot.screen.StartScreens;
 import com.halty.gramalyzerbot.channel.Channel;
@@ -24,8 +25,10 @@ public class ChannelConnector {
     private final StartScreens screens;
     private final BotApi gateway;
     private final CrmBridge crm;
+    private final BillingService billing;
 
     public Channel connect(User user, long chatId, String title, String username) {
+        billing.requireRoomFor(user, chatId); // throws when the plan has no room for another channel
         Channel ch = channels.register(chatId, title, username, null);
         membership.claim(ch, user); // throws if somebody else already owns it here
         ch = crm.ensureInCrm(ch);   // the website lists every channel the bot serves

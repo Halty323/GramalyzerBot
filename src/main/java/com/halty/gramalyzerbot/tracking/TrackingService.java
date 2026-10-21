@@ -105,12 +105,18 @@ public class TrackingService {
         return watchers.findByTrackedChannelIdAndOwner(c.getId(), owner).isPresent();
     }
 
+    public long watchCount(String owner) { return watchers.countByOwner(owner); }
+
     /** Adds a channel to a watchlist, fetching it first if nobody has looked at it recently. */
     public TrackedChannel track(String owner, String input) {
+        return track(owner, input, WEB.equals(owner) ? maxWeb : maxPerPerson);
+    }
+
+    /** Same, with the watchlist size the person's plan allows. */
+    public TrackedChannel track(String owner, String input, int max) {
         String username = username(input);
         TrackedChannel c = lookup(username);
         if (watching(owner, c)) return c;
-        int max = WEB.equals(owner) ? maxWeb : maxPerPerson;
         if (watchers.countByOwner(owner) >= max) throw new TrackingException(Code.LIMIT);
         try {
             watchers.save(new TrackedWatcher(c.getId(), owner));

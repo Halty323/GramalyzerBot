@@ -21,6 +21,8 @@ Any Linux VPS with **2 GB RAM**, 1–2 vCPU and 20 GB disk (Ubuntu 24.04 or Debi
 6. Start it: `docker compose -f compose.yaml -f compose.vps.yaml up -d --build`. The first build takes several minutes.
 7. Open `https://your.domain` and sign in with the API token. `docker compose logs -f app` shows startup; if `BOT_ADMINS` is empty, look for the `/claim CODE` line.
 
+Paid plans in the bot (Telegram Stars) are on with this setup. Set `BILLING_ENABLED=false` in `.env` to give everyone unlimited use, or change the prices with `BILLING_CREATOR_STARS` / `BILLING_PRO_STARS`. Earned Stars show up in the bot's balance in Telegram; withdrawals go through Fragment (1,000 Stars minimum).
+
 ## Updating
 
 ```

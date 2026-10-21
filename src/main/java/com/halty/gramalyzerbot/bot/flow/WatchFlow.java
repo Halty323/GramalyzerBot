@@ -1,5 +1,6 @@
 package com.halty.gramalyzerbot.bot.flow;
 
+import com.halty.gramalyzerbot.billing.BillingService;
 import com.halty.gramalyzerbot.bot.BotApi;
 import com.halty.gramalyzerbot.bot.screen.WatchScreens;
 import com.halty.gramalyzerbot.bot.ui.View;
@@ -30,6 +31,7 @@ public class WatchFlow {
             Pattern.CASE_INSENSITIVE);
 
     private final TrackingService tracking;
+    private final BillingService billing;
     private final UserService users;
     private final WatchScreens screens;
     private final BotApi gateway;
@@ -62,9 +64,14 @@ public class WatchFlow {
     public void track(User u, long chat, String input) {
         String username = TrackingService.username(input);
         gateway.typing(chat);
-        TrackedChannel c = tracking.track(TrackingService.owner(u), username);
+        TrackedChannel c = add(u, username);
         users.clearState(u);
         gateway.send(chat, card(u, c, Tr.t("watch.added")));
+    }
+
+    /** Puts a channel on the person's watchlist, within what their plan allows. */
+    public TrackedChannel add(User u, String username) {
+        return tracking.track(TrackingService.owner(u), username, billing.watchlistLimit(u));
     }
 
     public void untrack(User u, long chat, String input) {

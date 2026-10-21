@@ -74,7 +74,9 @@ It is also left out of Docker images, so containers are configured only through 
 | `SPRING_DATASOURCE_URL` / `_USERNAME` / `_PASSWORD` | – | PostgreSQL in production. The default is a local H2 file. |
 | `TRACKING_REFRESH_ENABLED` | – | `true` (default): refresh watched public channels in the background. Switch it off where `t.me` can't be reached. |
 | `TRACKING_REFRESH_EVERY` | – | How often each watched public channel is fetched again (default `PT2H`). Every visit adds that day to its subscriber history. |
-| `TRACKING_MAX_PER_PERSON` / `TRACKING_MAX_WEB` | – | Watchlist sizes: per person in the bot (default 20) and for the website (default 100) |
+| `TRACKING_MAX_PER_PERSON` / `TRACKING_MAX_WEB` | – | Watchlist sizes: per person in the bot (default 20; only while paid plans are off) and for the website (default 100) |
+| `BILLING_ENABLED` | – | Paid plans in the bot (see below). Off by default for local runs and the demo; `compose.yaml` turns it on |
+| `BILLING_CREATOR_STARS` / `BILLING_PRO_STARS` | – | Monthly prices in Telegram Stars (defaults 250 and 750). New subscriptions use the new price; running ones keep theirs |
 
 Then add the bot to your channel as an admin. To let the website's queue publish, give the bot **Post messages**. For comment counts, also add it to the linked discussion group. Open the bot in a private chat and tap **Connect my channel**, or just add it: the person who adds it becomes the channel's Owner in the bot.
 
@@ -133,6 +135,21 @@ Anyone can keep an eye on a public channel without being its admin and without a
 * **What's computed:** average views of posts older than 12 h, ER (views ÷ subscribers), reactions per 100 views, posts per day, format mix, hashtags, busiest hours and weekdays, top posts, and 7/30-day subscriber change.
 * In the demo profile, three made-up channels are on the website's watchlist so the viewer works without reaching Telegram.
 
+## Paid plans (Telegram Stars)
+
+With `BILLING_ENABLED=true` the bot sells monthly plans. Telegram requires Stars for digital goods inside bots, and no payment provider or BotFather setup is needed.
+
+| Plan | Price | Own channels | Watchlist |
+|---|---|---|---|
+| Free | – | 1 | 3 |
+| Creator | 250 ⭐ / 30 days | 3 | 10 |
+| Pro | 750 ⭐ / 30 days | 10 | 25 |
+
+* **Buying.** `/plan` (also the 💎 button under *Channels*) shows the plan, usage and offers. A button creates a Stars subscription invoice (`createInvoiceLink` with a 30-day `subscription_period`); Telegram renews it by itself and sends another successful payment each month. Cancel and resume are buttons on `/plan` (`editUserStarSubscription`). Buying another plan stops the old subscription.
+* **What a plan limits.** Channels a person *owns* (demo channels don't count) and their own watchlist. Moderators and admins invited to a channel use its owner's plan. If a plan ends with more channels connected than it covers, the oldest ones keep working; the rest show a "paused" notice instead of insights and get no digests or nudges, while posts are still recorded. Bot admins have no limits.
+* **Records.** Every payment is stored in `payments` with Telegram's charge id. A plan runs until `users.plan_until`, plus a day's grace for a late renewal unless renewal was cancelled; nothing has to run on a schedule.
+* **Support and refunds.** `/paysupport` (Telegram requires it) lists the person's recent payments; `/paysupport <message>` forwards the message and those payments to the bot admins. Admins refund with `/refund <charge id>`; a refund of the current period ends the plan and stops its renewal. `/admin` shows payments and Stars from the last 30 days.
+
 ## Languages
 
 The bot picks the language from the person's choice (🌐 Language, `/language`), then from their Telegram app's language, then English. Texts live in `src/main/resources/i18n/bot_<code>.properties`: Telegram HTML with `{0}` placeholders, plus plural forms per language (`.one`, `.few`, `.many`…). `I18nTest` checks that every language has every key with the same placeholders and HTML. The command menu is published in each language. To add a language, add it to `i18n.Lang` and copy `bot_en.properties`.
@@ -149,6 +166,7 @@ The bot picks the language from the person's choice (🌐 Language, `/language`)
 workspace/   CRM REST API, queue, delivery worker, demo workspace       (was here before)
 crm/         bridge between the two + the insights and feed endpoints
 tracking/    public channel watchlists: preview parser and client, stats, REST API, refresh jobs
+billing/     paid plans: limits, Stars payments and refunds
 i18n/        the bot's languages (Lang, Tr, plural rules); texts in resources/i18n
 analytics/   pure Java: engine, report, text features, scheduling rules (unit-tested)
 bot/         TelegramBot, BotRegistration, UpdateMapper/Router, BotApi (all Telegram calls)

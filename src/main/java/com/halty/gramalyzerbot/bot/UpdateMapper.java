@@ -23,6 +23,11 @@ public class UpdateMapper {
 
     public Optional<Object> map(Update u) {
         if (u.getCallbackQuery() != null) return Optional.ofNullable(callback(u.getCallbackQuery()));
+        if (u.getPreCheckoutQuery() != null) {
+            var q = u.getPreCheckoutQuery();
+            return Optional.of(new Events.PreCheckout(q.getId(), q.getFrom().getId(), q.getFrom().getLanguageCode(), q.getCurrency(),
+                    q.getTotalAmount() == null ? 0 : q.getTotalAmount(), q.getInvoicePayload()));
+        }
         if (u.getMessage() != null) return Optional.ofNullable(message(u.getMessage()));
         if (u.getChannelPost() != null) return Optional.of(channelPost(u.getChannelPost(), false));
         if (u.getEditedChannelPost() != null) return Optional.of(channelPost(u.getEditedChannelPost(), true));
@@ -57,6 +62,17 @@ public class UpdateMapper {
         if ("private".equals(type)) {
             var from = m.getFrom();
             if (from == null || Boolean.TRUE.equals(from.getIsBot())) return null;
+            if (m.getSuccessfulPayment() != null) {
+                var p = m.getSuccessfulPayment();
+                return new Events.Payment(from.getId(), from.getFirstName(), from.getUserName(), from.getLanguageCode(), m.getChatId(),
+                        p.getInvoicePayload(), p.getTotalAmount() == null ? 0 : p.getTotalAmount(), p.getTelegramPaymentChargeId(),
+                        p.getSubscriptionExpirationDate(), Boolean.TRUE.equals(p.getIsRecurring()), Boolean.TRUE.equals(p.getIsFirstRecurring()));
+            }
+            if (m.getRefundedPayment() != null) {
+                var r = m.getRefundedPayment();
+                return new Events.Refund(from.getId(), from.getFirstName(), from.getUserName(), from.getLanguageCode(), m.getChatId(),
+                        r.getTelegramPaymentChargeId(), r.getTotalAmount() == null ? 0 : r.getTotalAmount());
+            }
             String text = m.getText() != null ? m.getText() : m.getCaption();
             Events.DocumentInfo doc = null;
             if (m.getDocument() != null) {

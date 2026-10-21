@@ -56,6 +56,7 @@ public class CallbackFlow {
     private final TeamScreens team;
     private final AdminScreens admin;
     private final WatchFlow watch;
+    private final BillingFlow billing;
     private final TrackingService tracking;
     private final BotSettings botSettings;
     private final BotApi gateway;
@@ -108,6 +109,10 @@ public class CallbackFlow {
             case "adm" -> adminAction(u, c, a);
             case "wl" -> watchlist(u, c, a);
             case "lang" -> language(u, c, a);
+            case "bill" -> {
+                String text = billing.callback(u, c.chatId(), c.messageId(), a);
+                yield text == null ? Toast.NONE : new Toast(text, true); // about money: worth a dialog, not a passing toast
+            }
             default -> throw new IllegalArgumentException("unknown action " + a.get(0));
         };
     }
@@ -433,7 +438,7 @@ public class CallbackFlow {
             case "addid", "addu" -> {
                 gateway.typing(c.chatId());
                 String username = a.get(1).equals("addid") ? tracking.get(a.getLong(2)).getUsername() : a.get(2);
-                TrackedChannel ch = tracking.track(owner, username);
+                TrackedChannel ch = watch.add(u, username);
                 show(c, watch.card(u, ch, null));
                 return Toast.of(Tr.t("watch.added"));
             }
