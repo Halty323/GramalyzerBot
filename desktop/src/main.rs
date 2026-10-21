@@ -1,0 +1,38 @@
+//! Gramalyzer Studio: a desktop client for a Gramalyzer backend, for planning, writing and analysing Telegram
+//! channel content, with an AI copilot that works with any OpenAI-compatible provider.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod ai;
+mod api;
+mod app;
+mod charts;
+mod config;
+mod i18n;
+mod model;
+mod pages;
+mod prompts;
+mod theme;
+mod ui;
+mod view;
+
+use app::App;
+
+fn main() -> iced::Result {
+    iced::application(App::new, App::update, view::view)
+        .title(App::title)
+        .theme(|app: &App| theme::theme(app.dark))
+        .subscription(App::subscription)
+        .font(include_bytes!("../assets/fonts/Inter_400Regular.ttf").as_slice())
+        .font(include_bytes!("../assets/fonts/Inter_600SemiBold.ttf").as_slice())
+        .font(include_bytes!("../assets/fonts/Inter_700Bold.ttf").as_slice())
+        .font(include_bytes!("../assets/fonts/NotoSansArabic_400Regular.ttf").as_slice())
+        .font(include_bytes!("../assets/fonts/NotoSansArabic_600SemiBold.ttf").as_slice())
+        .font(include_bytes!("../assets/fonts/NotoSansDevanagari_400Regular.ttf").as_slice())
+        .font(include_bytes!("../assets/fonts/NotoSansDevanagari_600SemiBold.ttf").as_slice())
+        .font(include_bytes!("../assets/fonts/lucide.ttf").as_slice())
+        .default_font(ui::INTER)
+        .window_size((1440.0, 900.0))
+        .window(iced::window::Settings { min_size: Some(iced::Size::new(1180.0, 720.0)), ..Default::default() })
+        .antialiasing(true)
+        .run()
+}
