@@ -358,7 +358,7 @@
   "set.voice_placeholder": "ex.: Amigável e direta, parágrafos curtos, no máximo um emoji, falar com o leitor como “você”.",
   "set.voice_hint": "Descreva como o seu canal soa. Posts de exemplo também funcionam bem.",
   "set.content_lang": "Idioma dos rascunhos de IA",
-  "set.same_as_ui": "O mesmo da interface",
+  "set.same_as_posts": "O mesmo dos posts do canal",
   "set.content_lang_hint": "O idioma em que o seu canal é escrito.",
   "set.config": "Configurações que o bot usa para {handle}",
   "set.posting": "Publicação",

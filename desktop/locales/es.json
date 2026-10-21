@@ -358,7 +358,7 @@
   "set.voice_placeholder": "p. ej. Cercana y directa, párrafos cortos, como mucho un emoji, tutear a los lectores.",
   "set.voice_hint": "Describe cómo suena tu canal. También sirven publicaciones de ejemplo.",
   "set.content_lang": "Idioma de los borradores de IA",
-  "set.same_as_ui": "El mismo que la interfaz",
+  "set.same_as_posts": "El de las publicaciones del canal",
   "set.content_lang_hint": "El idioma en el que está escrito tu canal.",
   "set.config": "Ajustes que el bot usa para {handle}",
   "set.posting": "Publicación",

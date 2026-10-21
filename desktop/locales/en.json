@@ -379,7 +379,7 @@
   "set.voice_placeholder": "e.g. Friendly and direct, short paragraphs, one emoji at most, address readers as “you”.",
   "set.voice_hint": "Describe how your channel sounds. Example posts work well too.",
   "set.content_lang": "Language of AI drafts",
-  "set.same_as_ui": "Same as the interface",
+  "set.same_as_posts": "Same as the channel's posts",
   "set.content_lang_hint": "The language your channel is written in.",
   "set.config": "Settings the bot uses for {handle}",
   "set.posting": "Posting",

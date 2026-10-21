@@ -358,7 +358,7 @@
   "set.voice_placeholder": "ör. Samimi ve net, kısa paragraflar, en fazla bir emoji, okura “sen” diye hitap.",
   "set.voice_hint": "Kanalınızın nasıl bir dili olduğunu anlatın. Örnek gönderiler de işe yarar.",
   "set.content_lang": "Yapay zekâ taslaklarının dili",
-  "set.same_as_ui": "Arayüzle aynı",
+  "set.same_as_posts": "Kanal gönderileriyle aynı",
   "set.content_lang_hint": "Kanalınızın yazıldığı dil.",
   "set.config": "Botun {handle} için kullandığı ayarlar",
   "set.posting": "Yayınlama",

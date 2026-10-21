@@ -102,7 +102,7 @@ fn ai(app: &App) -> Element<'_, Message> {
 
 fn writing(app: &App) -> Element<'_, Message> {
     let s = &app.settings;
-    let mut langs = vec![Choice::new("", app.t("set.same_as_ui"))];
+    let mut langs = vec![Choice::new("", app.t("set.same_as_posts"))];
     langs.extend(LANGS.iter().map(|l| Choice::new(l.code, l.name)));
     card(
         column![
