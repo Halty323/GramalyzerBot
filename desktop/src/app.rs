@@ -251,6 +251,8 @@ pub struct App {
     pub workspace: Option<Workspace>,
     pub tracked: Option<Vec<TrackedSummary>>,
     pub insights: HashMap<String, Result<Insights, ApiError>>,
+    /// Each own channel's recent Telegram posts, so AI writes like the channel.
+    pub feeds: HashMap<String, ChannelFeed>,
     pub photos: HashMap<String, image::Handle>,
     requested_photos: HashSet<String>,
     pub page: Page,
@@ -277,6 +279,7 @@ pub enum Message {
     Workspace(Result<Workspace, ApiError>),
     Tracked(Result<Vec<TrackedSummary>, ApiError>),
     InsightsLoaded(String, Result<Insights, ApiError>),
+    FeedLoaded(String, Result<ChannelFeed, ApiError>),
     Photo(String, Option<Vec<u8>>),
     Navigate(Page),
     SelectChannel(Option<String>),
@@ -460,6 +463,7 @@ impl App {
             workspace: None,
             tracked: None,
             insights: HashMap::new(),
+            feeds: HashMap::new(),
             photos: HashMap::new(),
             requested_photos: HashSet::new(),
             page: Page::Dashboard,
@@ -579,6 +583,20 @@ impl App {
         Task::perform(self.client.clone().insights(id.clone()), move |r| Message::InsightsLoaded(id.clone(), r))
     }
 
+    /// What the AI needs to write like each channel: its insights and its recent posts. This covers every
+    /// channel, so it also loads whatever `page_data` would.
+    fn load_grounding(&mut self) -> Task<Message> {
+        let ids: Vec<String> = self.channels().iter().map(|c| c.id.clone()).collect();
+        let mut tasks = Vec::new();
+        for id in ids {
+            tasks.push(self.load_insights(&id, false));
+            if !self.feeds.contains_key(&id) {
+                tasks.push(Task::perform(self.client.clone().feed(id.clone()), move |r| Message::FeedLoaded(id.clone(), r)));
+            }
+        }
+        Task::batch(tasks)
+    }
+
     fn want_photo(&mut self, url: Option<String>) -> Task<Message> {
         let Some(url) = url else { return Task::none() };
         if !self.requested_photos.insert(url.clone()) {
@@ -618,13 +636,18 @@ impl App {
     }
 
     fn context(&self) -> prompts::Context<'_> {
-        let channel = self.focus_channel();
+        self.context_for(self.focus_channel())
+    }
+
+    fn context_for<'a>(&'a self, channel: Option<&'a Channel>) -> prompts::Context<'a> {
         prompts::Context {
             channel,
             insights: channel.and_then(|c| self.insights.get(&c.id)).and_then(|r| r.as_ref().ok()),
             posts: self.posts(),
+            feed: channel.and_then(|c| self.feeds.get(&c.id)).map(|f| f.posts.as_slice()).unwrap_or(&[]),
             voice: &self.config.brand_voice,
             language: self.content_lang_name(),
+            language_from_posts: self.config.content_lang.is_empty(),
         }
     }
 
@@ -715,7 +738,7 @@ impl App {
                 let mut tasks: Vec<Task<Message>> = photos.into_iter().map(|u| self.want_photo(u)).collect();
                 if first {
                     tasks.push(Task::perform(self.client.clone().tracked(), Message::Tracked));
-                    tasks.push(self.page_data());
+                    tasks.push(self.load_grounding());
                     if let Some(c) = self.focus_channel() {
                         let c = c.clone();
                         self.fill_channel_form(&c);
@@ -749,6 +772,12 @@ impl App {
             }
             Message::InsightsLoaded(id, r) => {
                 self.insights.insert(id, r);
+            }
+            Message::FeedLoaded(id, r) => {
+                // Without a feed the AI still has the description and the workspace posts to go on.
+                if let Ok(f) = r {
+                    self.feeds.insert(id, f);
+                }
             }
             Message::Photo(url, bytes) => {
                 if let Some(b) = bytes {
@@ -786,7 +815,9 @@ impl App {
             Message::Period(d) => self.period = d,
             Message::Reload => {
                 self.insights.clear();
-                return Task::batch([self.reload(), Task::perform(self.client.clone().tracked(), Message::Tracked)]).chain(self.page_data());
+                self.feeds.clear();
+                let data = self.load_grounding();
+                return Task::batch([self.reload(), Task::perform(self.client.clone().tracked(), Message::Tracked)]).chain(data);
             }
             Message::DismissError => self.error = None,
             Message::DismissToast => self.toast = None,
@@ -1019,14 +1050,7 @@ impl App {
                     self.studio.ai.error = Some(self.t("ai.need_brief"));
                     return Task::none();
                 }
-                let channel = self.channel_by_id(&self.studio.channel_id);
-                let ctx = prompts::Context {
-                    channel,
-                    insights: channel.and_then(|c| self.insights.get(&c.id)).and_then(|r| r.as_ref().ok()),
-                    posts: self.posts(),
-                    voice: &self.config.brand_voice,
-                    language: self.content_lang_name(),
-                };
+                let ctx = self.context_for(self.channel_by_id(&self.studio.channel_id));
                 let messages = prompts::rewrite(&ctx, kind, &self.studio.title, &body, &self.studio.brief, self.studio.tone, prompts::language_name(&self.studio.target_lang));
                 self.studio.last_rewrite = Some(kind);
                 let g = self.studio.ai.start();
@@ -1277,7 +1301,10 @@ impl App {
                     Ok(l) => {
                         let photo = match &l {
                             Loaded::Detail(d) => self.tracked_photo(&d.channel),
-                            Loaded::Feed(_) => None,
+                            Loaded::Feed(f) => {
+                                self.feeds.insert(f.channel_id.clone(), f.clone());
+                                None
+                            }
                         };
                         self.viewer.loaded = Some(l);
                         return self.want_photo(photo);

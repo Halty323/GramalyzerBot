@@ -52,10 +52,16 @@ public class DemoService {
      */
     @Transactional
     public void populate(Channel ch, long seed, int subscribers) {
+        populate(ch, seed, subscribers, DemoGenerator.Theme.TECH);
+    }
+
+    /** Like {@link #populate(Channel, long, int)}, with posts about the given subject. */
+    @Transactional
+    public void populate(Channel ch, long seed, int subscribers, DemoGenerator.Theme theme) {
         Instant now = Instant.now();
         List<Post> rows = new ArrayList<>();
         int id = 1;
-        for (DemoGenerator.DemoPost d : DemoGenerator.generate(now, ch.zone(), seed, DAYS)) {
+        for (DemoGenerator.DemoPost d : DemoGenerator.generate(now, ch.zone(), seed, DAYS, theme)) {
             Post p = new Post();
             p.setChannelId(ch.getId());
             p.setMessageId(id++);

@@ -79,7 +79,7 @@ Sources: the providers' own rate-limit pages ([Groq](https://console.groq.com/do
 
 Free tiers can log prompts, so don't send anything confidential. When one provider hits its limit, switch to another in Settings.
 
-Every request carries the channel's context: its analytics (best hours, which formats work, its strongest posts), your brand voice and the language to write in. Prompts tell the model that Telegram posts are plain text (no Markdown) with a 4096-character limit. The prompts are in `src/prompts.rs`.
+Every request carries the channel's context, so posts stay on the channel's subject and sound like it. The model sees the channel's name and description, six of its own recent posts in full (its most engaging first, then the newest), its house style in numbers (typical length, emoji, links, the hashtags it uses), what is already drafted or scheduled, its analytics (best hours, which formats, lengths and hashtags work) and your brand voice. Drafts are written in the language of the channel's posts unless you pick one under **Settings → Writing**. Prompts tell the model that Telegram posts are plain text (no Markdown) with a 4096-character limit. The prompts are in `src/prompts.rs`.
 
 ## Why iced
 

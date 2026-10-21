@@ -358,7 +358,7 @@
   "set.voice_placeholder": "ví dụ: Thân thiện và thẳng thắn, đoạn ngắn, tối đa một emoji, xưng “bạn” với người đọc.",
   "set.voice_hint": "Mô tả giọng văn của kênh. Bài mẫu cũng rất hữu ích.",
   "set.content_lang": "Ngôn ngữ bản nháp AI",
-  "set.same_as_ui": "Giống giao diện",
+  "set.same_as_posts": "Giống các bài đăng của kênh",
   "set.content_lang_hint": "Ngôn ngữ kênh của bạn sử dụng.",
   "set.config": "Cài đặt bot dùng cho {handle}",
   "set.posting": "Đăng bài",

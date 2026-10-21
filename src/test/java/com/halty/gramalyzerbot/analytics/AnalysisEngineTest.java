@@ -20,9 +20,13 @@ class AnalysisEngineTest {
     private static final Instant NOW = Instant.parse("2026-10-15T12:00:00Z");
 
     private static List<Sample> demo(int days) {
+        return demo(days, DemoGenerator.Theme.TECH);
+    }
+
+    private static List<Sample> demo(int days, DemoGenerator.Theme theme) {
         List<Sample> out = new ArrayList<>();
         long id = 1;
-        for (DemoGenerator.DemoPost p : DemoGenerator.generate(NOW, BERLIN, 42, days)) {
+        for (DemoGenerator.DemoPost p : DemoGenerator.generate(NOW, BERLIN, 42, days, theme)) {
             out.add(new Sample(id, (int) id, p.postedAt(), p.kind(), p.text(), p.hasLink(),
                     TextFeatures.hashtags(p.text()), p.reactions(), p.comments(), true, false, null));
             id++;
@@ -54,6 +58,26 @@ class AnalysisEngineTest {
         assertEquals("memes", r.topics().get(r.topics().size() - 1).key());
         assertTrue(r.topics().get(0).lift() > 1.2);
         assertTrue(r.topics().get(r.topics().size() - 1).lift() < 0.85);
+    }
+
+    @Test
+    void demoThemesWriteAboutTheirOwnSubject() {
+        Report design = new AnalysisEngine().analyze(demo(300, DemoGenerator.Theme.DESIGN), opts(Metric.ENGAGEMENT, 0));
+        assertEquals("typography", design.topics().get(0).key());
+        assertEquals("humor", design.topics().get(design.topics().size() - 1).key());
+        List<String> tags = design.topics().stream().map(Group::key).toList();
+        assertFalse(tags.contains("ai") || tags.contains("memes"), "tags " + tags);
+        // same timing and formats as the default theme, only the words differ
+        List<Sample> tech = demo(300), makers = demo(300, DemoGenerator.Theme.MAKERS);
+        assertEquals(tech.size(), makers.size());
+        assertEquals(tech.get(17).postedAt(), makers.get(17).postedAt());
+        assertEquals(tech.get(17).reactions(), makers.get(17).reactions());
+        assertTrue(makers.get(17).text().contains("#" + makers.get(17).topics().get(0)));
+        assertTrue(makers.stream().noneMatch(s -> s.text().contains("model") || s.text().contains("logo")));
+
+        assertEquals(DemoGenerator.Theme.DESIGN, DemoGenerator.Theme.guess("design", "Design Dispatch", null));
+        assertEquals(DemoGenerator.Theme.MAKERS, DemoGenerator.Theme.guess("x", "Club", "A place for people who make things."));
+        assertEquals(DemoGenerator.Theme.TECH, DemoGenerator.Theme.guess("tech", "The Tech Edit", "Technology, thoughtfully curated."));
     }
 
     @Test

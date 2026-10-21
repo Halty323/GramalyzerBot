@@ -358,7 +358,7 @@
   "set.voice_placeholder": "masalan, Samimiy va aniq, qisqa xatboshilar, koʻpi bilan bitta emoji, oʻquvchiga “siz” deb murojaat.",
   "set.voice_hint": "Kanalingiz qanday ohangda yozilishini tasvirlang. Namuna postlar ham yaxshi ishlaydi.",
   "set.content_lang": "AI qoralamalari tili",
-  "set.same_as_ui": "Interfeys bilan bir xil",
+  "set.same_as_posts": "Kanal postlaridagi kabi",
   "set.content_lang_hint": "Kanalingiz yoziladigan til.",
   "set.config": "Bot {handle} uchun ishlatadigan sozlamalar",
   "set.posting": "Chiqarish",

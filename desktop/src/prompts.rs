@@ -1,5 +1,6 @@
 //! What the app asks the model. Prompts are English (models follow it best) and name the language to write in.
-//! Every request carries the channel's context: what it is, what the bot's analysis says works, and its voice.
+//! Every request carries the channel's context: what it is about, real posts to imitate, what the bot's analysis
+//! says works, and its voice.
 use crate::ai::ChatMessage;
 use crate::app::{Rewrite, local};
 use crate::model::*;
@@ -8,9 +9,14 @@ use std::fmt::Write;
 pub struct Context<'a> {
     pub channel: Option<&'a Channel>,
     pub insights: Option<&'a Insights>,
+    /// Workspace posts of every channel (drafts, queue, published).
     pub posts: &'a [Post],
+    /// The channel's own published posts as Telegram has them, newest first.
+    pub feed: &'a [FeedPost],
     pub voice: &'a str,
     pub language: String,
+    /// No language was chosen for drafts: write in the language of the channel's posts, `language` without any.
+    pub language_from_posts: bool,
 }
 
 pub fn language_name(code: &str) -> &'static str {
@@ -32,7 +38,16 @@ pub fn language_name(code: &str) -> &'static str {
 
 const ROLE: &str = "You are the content strategist and copywriter inside Gramalyzer Studio, a tool for running Telegram channels. \
 Telegram posts are sent as plain text: never use Markdown (no **bold**, no # headings, no [links](…)); emoji and line breaks are fine. \
-A post's text may be at most 4096 characters; good channel posts are usually 300–1200. Be concrete and specific; avoid clichés and filler.";
+A post's text may be at most 4096 characters. Be concrete and specific; avoid clichés and filler.";
+
+const FIT: &str = "Everything you write must fit this channel: its subject and audience, as the name, description and posts above show. \
+Do not drift into generic topics (marketing, growth, AI, productivity, motivation) unless the channel is about them. \
+Write posts the way the channel's own posts are written: similar length, structure, emoji and hashtag habits, and voice. \
+Reuse the channel's hashtags rather than inventing new ones.";
+
+/// How many of the channel's posts go into a prompt as examples, and how much of each.
+const EXAMPLES: usize = 6;
+const EXAMPLE_CHARS: usize = 600;
 
 fn day_name(day: &str) -> String {
     let mut s = day.to_lowercase();
@@ -42,30 +57,128 @@ fn day_name(day: &str) -> String {
     s
 }
 
-/// A compact description of the channel and what its numbers say, for the system prompt.
+/// Cuts `text` to about `max` characters at a word boundary.
+fn clip(text: &str, max: usize) -> String {
+    let text = text.trim();
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let cut: String = text.chars().take(max).collect();
+    let end = cut.rfind(char::is_whitespace).filter(|&i| i > max / 2).unwrap_or(cut.len());
+    format!("{}…", cut[..end].trim_end())
+}
+
+fn is_emoji(c: char) -> bool {
+    matches!(c as u32, 0x1F000..=0x1FAFF | 0x2600..=0x27BF | 0x2B00..=0x2BFF)
+}
+
+fn hashtags(text: &str) -> impl Iterator<Item = String> + '_ {
+    text.split_whitespace()
+        .filter_map(|w| w.strip_prefix('#'))
+        .map(|t| t.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_'))
+        .filter(|t| t.chars().next().is_some_and(char::is_alphabetic))
+        .map(|t| format!("#{}", t.to_lowercase()))
+}
+
+/// The channel's own posts that are worth imitating: the most engaging ones first, then the newest.
+fn examples<'a>(feed: &'a [FeedPost]) -> Vec<&'a FeedPost> {
+    let own: Vec<&FeedPost> = feed.iter().filter(|p| p.forwarded_from.is_none() && p.text.trim().chars().count() >= 20).collect();
+    let mut best = own.clone();
+    best.sort_by(|a, b| b.reactions.cmp(&a.reactions));
+    let opening = |p: &FeedPost| p.text.trim().lines().next().unwrap_or("").trim().to_lowercase();
+    let mut out: Vec<&FeedPost> = Vec::new();
+    // Recurring formats (a weekly digest, say) would otherwise fill every slot with the same opening.
+    let add = |p: &'a FeedPost, out: &mut Vec<&'a FeedPost>| {
+        if !out.iter().any(|q| q.id == p.id || opening(q) == opening(p)) {
+            out.push(p);
+        }
+    };
+    for p in best {
+        if out.len() >= EXAMPLES / 2 {
+            break;
+        }
+        add(p, &mut out);
+    }
+    for p in own {
+        if out.len() >= EXAMPLES {
+            break;
+        }
+        add(p, &mut out);
+    }
+    out
+}
+
+/// Habits the posts share, in numbers: length, emoji, hashtags, links.
+fn house_style(feed: &[FeedPost]) -> Option<String> {
+    let texts: Vec<&str> = feed.iter().filter(|p| p.forwarded_from.is_none()).map(|p| p.text.trim()).filter(|t| !t.is_empty()).collect();
+    if texts.len() < 5 {
+        return None;
+    }
+    let share = |f: &dyn Fn(&str) -> bool| texts.iter().filter(|t| f(t)).count() * 100 / texts.len();
+    let mut lengths: Vec<usize> = texts.iter().map(|t| t.chars().count()).collect();
+    lengths.sort_unstable();
+    let mut tags: Vec<(String, usize)> = Vec::new();
+    for t in &texts {
+        for tag in hashtags(t) {
+            match tags.iter_mut().find(|(k, _)| *k == tag) {
+                Some((_, n)) => *n += 1,
+                None => tags.push((tag, 1)),
+            }
+        }
+    }
+    tags.sort_by(|a, b| b.1.cmp(&a.1));
+    let mut s = format!(
+        "House style of the last {} posts: typically about {} characters; paragraphs in {}%; emoji in {}%; links in {}%; hashtags in {}%",
+        texts.len(),
+        lengths[lengths.len() / 2],
+        share(&|t| t.contains("\n\n")),
+        share(&|t| t.chars().any(is_emoji)),
+        share(&|t| t.contains("http://") || t.contains("https://") || t.contains("t.me/")),
+        share(&|t| hashtags(t).next().is_some()),
+    );
+    if !tags.is_empty() {
+        let _ = write!(s, " (most used: {})", tags.iter().take(8).map(|(k, _)| k.as_str()).collect::<Vec<_>>().join(" "));
+    }
+    Some(s)
+}
+
+/// A description of the channel, its real posts and what its numbers say, for the system prompt.
 pub fn describe(ctx: &Context) -> String {
     let mut s = String::new();
+    let examples = examples(ctx.feed);
     if let Some(c) = ctx.channel {
         let _ = writeln!(s, "Channel: {} {}", c.name, c.handle);
         if !c.description.trim().is_empty() {
             let _ = writeln!(s, "About: {}", c.description.trim());
         }
         let _ = writeln!(s, "Subscribers: {}", c.subscribers);
-        let recent: Vec<&Post> = {
-            let mut v: Vec<&Post> = ctx.posts.iter().filter(|p| p.channel_id == c.id && p.status == PostStatus::Published).collect();
-            v.sort_by(|a, b| b.scheduled_at.cmp(&a.scheduled_at));
-            v.into_iter().take(6).collect()
-        };
-        if !recent.is_empty() {
-            let _ = writeln!(s, "Recent posts (title — first line):");
-            for p in recent {
-                let first: String = p.body.lines().next().unwrap_or("").chars().take(140).collect();
-                let _ = writeln!(s, "- {} — {}", p.title, first);
+        let mut mine: Vec<&Post> = ctx.posts.iter().filter(|p| p.channel_id == c.id).collect();
+        mine.sort_by(|a, b| b.scheduled_at.cmp(&a.scheduled_at));
+        if !examples.is_empty() {
+            let _ = writeln!(s, "\nPosts from this channel, to learn its subject, voice and formatting (the most engaging first, then the newest):");
+            for (n, p) in examples.iter().enumerate() {
+                let _ = writeln!(s, "[{}] {} reactions\n{}\n", n + 1, p.reactions, clip(&p.text, EXAMPLE_CHARS));
             }
+        } else {
+            // Nothing from Telegram yet: the posts written in the workspace are the next best thing.
+            let published: Vec<&&Post> = mine.iter().filter(|p| p.status == PostStatus::Published).take(EXAMPLES).collect();
+            if !published.is_empty() {
+                let _ = writeln!(s, "\nPosts from this channel, to learn its subject, voice and formatting:");
+                for (n, p) in published.iter().enumerate() {
+                    let _ = writeln!(s, "[{}] {}\n{}\n", n + 1, p.title, clip(&p.body, EXAMPLE_CHARS));
+                }
+            }
+        }
+        if let Some(style) = house_style(ctx.feed) {
+            let _ = writeln!(s, "{style}");
+        }
+        let planned: Vec<&str> = mine.iter().filter(|p| p.status != PostStatus::Published).map(|p| p.title.trim()).filter(|t| !t.is_empty()).take(8).collect();
+        if !planned.is_empty() {
+            let _ = writeln!(s, "Already drafted or scheduled (do not repeat): {}", planned.join("; "));
         }
     }
     if let Some(i) = ctx.insights.filter(|i| i.status == "ready") {
-        let _ = writeln!(s, "Analytics (engagement lift vs. the channel's typical post, 1.0 = typical; timezone {}):", i.timezone);
+        let _ = writeln!(s, "\nAnalytics (engagement lift vs. the channel's typical post, 1.0 = typical; timezone {}):", i.timezone);
         let times: Vec<String> = i.best_times.iter().take(3).map(|t| format!("{} {:02}:00 ({:.1}×)", day_name(&t.day), t.hour, t.lift)).collect();
         if !times.is_empty() {
             let _ = writeln!(s, "- Best times: {}", times.join(", "));
@@ -84,9 +197,11 @@ pub fn describe(ctx: &Context) -> String {
             let _ = writeln!(s, "- Keywords: {}", groups(&i.content.keywords));
         }
         let _ = writeln!(s, "- Posts per week: {:.1}; average reactions {:.1}, comments {:.1}", i.cadence.posts_per_week, i.avg_reactions, i.avg_comments);
-        let top: Vec<String> = i.top_posts.iter().take(4).filter(|p| !p.preview.is_empty()).map(|p| format!("\"{}\" ({} reactions, {} comments)", p.preview.chars().take(120).collect::<String>(), p.reactions, p.comments)).collect();
-        if !top.is_empty() {
-            let _ = writeln!(s, "- Strongest posts: {}", top.join("; "));
+        if examples.is_empty() {
+            let top: Vec<String> = i.top_posts.iter().take(4).filter(|p| !p.preview.is_empty()).map(|p| format!("\"{}\" ({} reactions, {} comments)", p.preview, p.reactions, p.comments)).collect();
+            if !top.is_empty() {
+                let _ = writeln!(s, "- Strongest posts: {}", top.join("; "));
+            }
         }
     }
     if !ctx.voice.trim().is_empty() {
@@ -97,19 +212,26 @@ pub fn describe(ctx: &Context) -> String {
 
 fn system(ctx: &Context, extra: &str) -> ChatMessage {
     let about = describe(ctx);
-    ChatMessage::system(format!("{ROLE}\n\n{about}\nWrite in {} unless asked otherwise.\n{extra}", ctx.language))
+    let fit = if ctx.channel.is_some() { FIT } else { "" };
+    let has_posts = !ctx.feed.is_empty() || ctx.channel.is_some_and(|c| ctx.posts.iter().any(|p| p.channel_id == c.id && p.status == PostStatus::Published));
+    let language = if ctx.language_from_posts && has_posts {
+        "Write in the language the channel's posts are written in, unless asked otherwise.".to_string()
+    } else {
+        format!("Write in {} unless asked otherwise.", ctx.language)
+    };
+    ChatMessage::system(format!("{ROLE}\n\n{about}\n{fit}\n{language}\n{extra}"))
 }
 
 pub fn rewrite(ctx: &Context, kind: Rewrite, title: &str, body: &str, brief: &str, tone: &str, target: &str) -> Vec<ChatMessage> {
     let only = "Answer with the post text only: no preface, no quotes around it, no explanation.";
     let task = match kind {
-        Rewrite::Draft => format!("Write a new Telegram post for this channel from the brief below. Open with a strong first line (it is what shows in the chat list), keep paragraphs short, end with a natural call to action or question. {only}\n\nBrief: {brief}"),
+        Rewrite::Draft => format!("Write a new Telegram post for this channel from the brief below, on the channel's subject and in the style of its posts. Open with a strong first line (it is what shows in the chat list), keep paragraphs short, end with a natural call to action or question. {only}\n\nBrief: {brief}"),
         Rewrite::Improve => format!("Edit this post to make it clearer, tighter and more engaging, keeping its meaning, facts and language. {only}"),
         Rewrite::Shorten => format!("Cut this post to about half its length without losing the key point. {only}"),
         Rewrite::Expand => format!("Expand this post with useful specifics, an example or a short list, staying under 1500 characters. {only}"),
         Rewrite::Hook => format!("Rewrite only the opening (first one or two lines) so it makes people stop scrolling, then keep the rest of the post as it is. {only}"),
         Rewrite::Grammar => format!("Fix spelling, grammar and punctuation only. Do not change wording or style otherwise. {only}"),
-        Rewrite::Hashtags => "Suggest 3 to 6 hashtags for this post that fit the channel (prefer ones the analytics show working). Answer with the hashtags on one line, separated by spaces, nothing else.".to_string(),
+        Rewrite::Hashtags => "Suggest 3 to 6 hashtags for this post that fit the channel (prefer the ones it already uses and the analytics show working). Answer with the hashtags on one line, separated by spaces, nothing else.".to_string(),
         Rewrite::Headlines => "Suggest 5 short internal titles (under 70 characters) for this post, one per line, numbered. Nothing else.".to_string(),
         Rewrite::Translate => format!("Translate this post into {target}, keeping its tone, emoji and line breaks; adapt idioms naturally. {only}"),
         Rewrite::Tone => format!("Rewrite this post in a {tone} tone, keeping its facts and language. {only}"),
@@ -124,11 +246,16 @@ pub fn rewrite(ctx: &Context, kind: Rewrite, title: &str, body: &str, brief: &st
 }
 
 pub fn plan(ctx: &Context, count: usize, brief: &str) -> Vec<ChatMessage> {
-    let brief = if brief.trim().is_empty() { "Mix formats: practical value, a story or behind-the-scenes, a question to the audience, and something timely.".to_string() } else { brief.trim().to_string() };
+    let brief = if brief.trim().is_empty() {
+        "what this channel's audience follows it for. Mix useful posts, a story or behind-the-scenes and a question to the audience, all on the channel's own subject.".to_string()
+    } else {
+        brief.trim().to_string()
+    };
     vec![
-        system(ctx, "You plan content calendars. Base ideas on what the analytics show working; vary formats; never repeat a recent post."),
+        system(ctx, "You plan content calendars. Base ideas on the channel's subject and on what the analytics show working; vary formats; never repeat a recent post."),
         ChatMessage::user(format!(
             "Plan the next {count} posts for this channel. Focus: {brief}\n\
+             Every post must be on the channel's subject and read like its own posts. \
              Write each post in full, ready to publish. Return ONLY a JSON array, no prose, like:\n\
              [{{\"title\": \"short internal title\", \"category\": \"one or two words\", \"body\": \"the full post text\"}}]"
         )),
@@ -210,9 +337,8 @@ pub fn split_title(answer: &str) -> (String, String) {
 mod tests {
     use super::*;
 
-    #[test]
-    fn context_mentions_channel_and_voice() {
-        let c = Channel {
+    fn channel() -> Channel {
+        Channel {
             id: "a".into(),
             name: "Design Notes".into(),
             handle: "@designnotes".into(),
@@ -229,13 +355,76 @@ mod tests {
             auto_delete: false,
             signature: String::new(),
             telegram_chat_id: None,
-        };
-        let ctx = Context { channel: Some(&c), insights: None, posts: &[], voice: "warm, no jargon", language: "Ukrainian".into() };
+        }
+    }
+
+    fn feed_post(id: &str, text: &str, reactions: i64) -> FeedPost {
+        FeedPost {
+            id: id.into(),
+            posted_at: String::new(),
+            kind: "TEXT".into(),
+            text: text.into(),
+            views: None,
+            reactions,
+            reaction_list: vec![],
+            comments: None,
+            url: None,
+            forwarded_from: None,
+            edited: false,
+        }
+    }
+
+    #[test]
+    fn context_mentions_channel_and_voice() {
+        let c = channel();
+        let ctx = Context { channel: Some(&c), insights: None, posts: &[], feed: &[], voice: "warm, no jargon", language: "Ukrainian".into(), language_from_posts: false };
         let m = rewrite(&ctx, Rewrite::Shorten, "T", "Body", "", "friendly", "English");
         assert!(m[0].content.contains("Design Notes"));
         assert!(m[0].content.contains("warm, no jargon"));
         assert!(m[0].content.contains("Write in Ukrainian"));
+        assert!(m[0].content.contains("subject and audience"));
         assert!(m[1].content.contains("Body"));
+    }
+
+    #[test]
+    fn real_posts_ground_the_prompt() {
+        let c = channel();
+        let long = format!("Kerning matters 🎨\n\n{} #typography", "Letter pairs need care. ".repeat(40));
+        let mut feed = vec![
+            feed_post("1", "Five typefaces we keep coming back to\n\nAll free for commercial use. #typography", 40),
+            feed_post("2", &long, 300),
+            feed_post("3", "Rebrand teardown: what the new logo gets right #branding", 90),
+            feed_post("4", "Moodboard of the week: soft gradients and paper textures #inspiration", 5),
+            feed_post("5", "Empty states worth stealing for your next product #ux", 12),
+            feed_post("6", "Posters from the Swiss archive that still feel modern #inspiration", 7),
+            feed_post("7", "Colour palettes pulled from old film stills #inspiration", 3),
+        ];
+        feed.push(FeedPost { forwarded_from: Some("Other".into()), ..feed_post("8", "A forwarded post about crypto airdrops", 999) });
+        feed.push(feed_post("9", "Kerning matters 🎨\n\nThe same series again. #typography", 250));
+        let ctx = Context { channel: Some(&c), insights: None, posts: &[], feed: &feed, voice: "", language: "English".into(), language_from_posts: true };
+        let sys = &plan(&ctx, 3, "")[0].content;
+        // the most engaging posts come first, then the newest; forwards are someone else's words
+        let p2 = sys.find("[1] 300 reactions").expect("best post first");
+        assert!(sys[p2..].contains("[2] 90 reactions") && sys.contains("[3] 40 reactions") && sys.contains("[4] 5 reactions\nMoodboard"));
+        assert!(!sys.contains("crypto") && !sys.contains("same series"));
+        assert!(!sys.contains("[7]"));
+        assert!(sys.contains("Five typefaces") && sys.contains("All free for commercial use"));
+        assert!(sys.contains("Letter pairs need care") && !sys.contains(&long), "long posts are clipped");
+        assert!(sys.contains("most used: #typography #inspiration #branding #ux"));
+        assert!(sys.contains("language the channel's posts are written in"));
+        assert!(!sys.contains("Write in English"));
+        assert!(!plan(&ctx, 3, "")[1].content.contains("timely"));
+
+        // with no posts at all there is nothing to copy the language from
+        let ctx = Context { feed: &[], ..ctx };
+        assert!(plan(&ctx, 3, "")[0].content.contains("Write in English"));
+    }
+
+    #[test]
+    fn clip_cuts_at_a_word() {
+        assert_eq!(clip("short", 10), "short");
+        assert_eq!(clip("one two three four", 12), "one two…");
+        assert_eq!(hashtags("Hi #Design, #ux! #1 a#b").collect::<Vec<_>>(), vec!["#design", "#ux"]);
     }
 
     #[test]

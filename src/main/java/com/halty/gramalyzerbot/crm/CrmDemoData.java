@@ -2,6 +2,7 @@ package com.halty.gramalyzerbot.crm;
 
 import com.halty.gramalyzerbot.channel.Channel;
 import com.halty.gramalyzerbot.channel.ChannelService;
+import com.halty.gramalyzerbot.post.DemoGenerator;
 import com.halty.gramalyzerbot.post.DemoService;
 import com.halty.gramalyzerbot.workspace.Models;
 import org.springframework.beans.factory.annotation.Value;
@@ -11,8 +12,8 @@ import java.util.Optional;
 
 /**
  * In demo mode the CRM's sample channels (design, tech, makers) have no Telegram chat behind them. The first time
- * their insights are requested they get an analytics twin filled with realistic fake posts, so the website's
- * insights can be explored without a bot. Does nothing outside demo mode.
+ * their insights are requested they get an analytics twin filled with realistic fake posts about the channel's subject,
+ * so the website's insights can be explored without a bot. Does nothing outside demo mode.
  */
 @Component
 public class CrmDemoData {
@@ -47,7 +48,8 @@ public class CrmDemoData {
         ch.setHistoryImported(true);
         ch.setWorkspaceChannelId(crm.id());
         ch = channels.save(ch);
-        demoService.populate(ch, crm.id().hashCode(), subscribers);
+        demoService.populate(ch, crm.id().hashCode(), subscribers,
+                DemoGenerator.Theme.guess(crm.id(), crm.name(), crm.description()));
         return Optional.of(ch);
     }
 }

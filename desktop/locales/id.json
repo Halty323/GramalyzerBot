@@ -358,7 +358,7 @@
   "set.voice_placeholder": "mis. Ramah dan lugas, paragraf pendek, paling banyak satu emoji, sapa pembaca dengan “kamu”.",
   "set.voice_hint": "Jelaskan gaya kanal Anda. Contoh postingan juga bisa membantu.",
   "set.content_lang": "Bahasa draf AI",
-  "set.same_as_ui": "Sama dengan antarmuka",
+  "set.same_as_posts": "Sama dengan postingan kanal",
   "set.content_lang_hint": "Bahasa yang dipakai di kanal Anda.",
   "set.config": "Pengaturan yang dipakai bot untuk {handle}",
   "set.posting": "Penerbitan",
