@@ -1,0 +1,30 @@
+# Adds automatic HTTPS (Caddy) to compose.yaml for a small VPS:
+#
+#   docker compose -f compose.yaml -f compose.vps.yaml up -d --build
+#
+# Set DOMAIN in .env to a name that already points at the server (A/AAAA record). Caddy gets and renews the
+# certificate itself; ports 80 and 443 must be open. The app is then reachable only through Caddy.
+# Needs Docker Compose 2.24 or newer (for !reset). See deploy/VPS.md.
+
+services:
+  app:
+    ports: !reset []
+
+  caddy:
+    image: caddy:2-alpine
+    depends_on:
+      - app
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+    restart: unless-stopped
+
+volumes:
+  caddy-data:
+  caddy-config:
