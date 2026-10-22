@@ -41,4 +41,14 @@ public final class Events {
 
     public record Callback(String id, long userId, String firstName, String username, String lang, long chatId,
                            int messageId, String data) {}
+
+    /** Telegram asks whether to go ahead with a Stars payment. */
+    public record PreCheckout(String id, long userId, String lang, String currency, int total, String payload) {}
+
+    /** A Stars payment went through: a first payment or an automatic renewal. {@code expiresAt} is epoch seconds or null. */
+    public record Payment(long userId, String firstName, String username, String lang, long chatId, String payload,
+                          int total, String chargeId, Integer expiresAt, boolean recurring, boolean firstRecurring) {}
+
+    /** A Stars payment was refunded. */
+    public record Refund(long userId, String firstName, String username, String lang, long chatId, String chargeId, int total) {}
 }

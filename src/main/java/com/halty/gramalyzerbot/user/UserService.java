@@ -95,6 +95,9 @@ public class UserService {
 
     public boolean anyBotAdmin() { return !props.admins().isEmpty() || !users.findAllByBotAdminTrue().isEmpty(); }
 
+    /** Everyone who can open /admin and has talked to the bot (so it can message them). */
+    public List<User> botAdmins() { return users.findAllByBotAdminTrue(); }
+
     public long count() { return users.count(); }
 
     public long bannedCount() { return users.countByBannedTrue(); }

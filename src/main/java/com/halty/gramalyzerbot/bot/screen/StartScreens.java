@@ -69,6 +69,7 @@ public class StartScreens {
         v.row(Btn.cb(Tr.t("start.btn.connect_another"), "ch:connect"));
         v.row(Btn.cb(Tr.t("btn.watchlist"), "wl:list"));
         v.rowIf(mine.stream().noneMatch(Channel::isDemo), Btn.cb(Tr.t("start.btn.explore"), "ch:demo"));
+        v.row(Btn.cb(Tr.t("plan.btn.my_plan"), "bill:home"));
         v.rowIf(botAdmin, Btn.cb(Tr.t("start.btn.admin"), "adm:home"));
         return v;
     }

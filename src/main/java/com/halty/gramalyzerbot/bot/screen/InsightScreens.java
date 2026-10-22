@@ -6,6 +6,7 @@ import com.halty.gramalyzerbot.analytics.Report.Group;
 import com.halty.gramalyzerbot.analytics.Report.Scored;
 import com.halty.gramalyzerbot.analytics.Report.Slot;
 import com.halty.gramalyzerbot.analytics.Sample;
+import com.halty.gramalyzerbot.billing.BillingService;
 import com.halty.gramalyzerbot.i18n.Tr;
 import com.halty.gramalyzerbot.bot.ui.*;
 import com.halty.gramalyzerbot.channel.*;
@@ -29,10 +30,20 @@ public class InsightScreens {
 
     private final AnalysisService analysis;
     private final SubscriberService subscribers;
+    private final BillingService billing;
+    private final PlanScreens plans;
+
+    /** The "paused" notice when the owner's plan no longer covers this channel, else null. */
+    private View paused(Channel ch) {
+        OptionalInt limit = billing.pausedLimit(ch);
+        return limit.isPresent() ? plans.paused(ch, limit.getAsInt()) : null;
+    }
 
     // ------------------------------------------------------------------ best times
 
     public View times(Channel ch, int win, String mode) {
+        View paused = paused(ch);
+        if (paused != null) return paused;
         Report r = analysis.report(ch, win);
         View v = header(Tr.t("times.title"), ch, win, true);
         View gate = gate(v, r, ch);
@@ -111,6 +122,8 @@ public class InsightScreens {
     private record Item(String label, double lift, int posts) {}
 
     public View content(Channel ch, int win, String mode) {
+        View paused = paused(ch);
+        if (paused != null) return paused;
         Report r = analysis.report(ch, win);
         View v = header(Tr.t("content.title"), ch, win, false);
         View gate = gate(v, r, ch);
@@ -223,6 +236,8 @@ public class InsightScreens {
     // ------------------------------------------------------------------ top posts
 
     public View top(Channel ch, Role role, int page) {
+        View paused = paused(ch);
+        if (paused != null) return paused;
         Report r = analysis.report(ch);
         List<Scored> all = r.topPosts().size() > MAX_TOP ? r.topPosts().subList(0, MAX_TOP) : r.topPosts();
         View v = new View().line(Tr.t("top.title")).line("<i>" + Fmt.esc(ch.getTitle()) + " · " + Labels.window(ch.getWindowDays()) + "</i>").blank();
@@ -261,6 +276,8 @@ public class InsightScreens {
     }
 
     public View excluded(Channel ch, Role role) {
+        View paused = paused(ch);
+        if (paused != null) return paused;
         List<Sample> ex = analysis.samples(ch).stream().filter(Sample::excluded)
                 .sorted(Comparator.comparing(Sample::postedAt).reversed()).limit(10).toList();
         View v = new View().line(Tr.t("excluded.title")).line(Tr.t("excluded.hint")).blank();
@@ -276,6 +293,8 @@ public class InsightScreens {
     // ------------------------------------------------------------------ growth
 
     public View growth(Channel ch, int days) {
+        View paused = paused(ch);
+        if (paused != null) return paused;
         SubscriberService.Growth g = subscribers.growth(ch, days);
         View v = new View().line(Tr.t("growth.title")).line("<i>" + Fmt.esc(ch.getTitle()) + " · " + Labels.window(days) + "</i>").blank();
         if (g.current() != null) v.line(Tr.t("growth.now", Fmt.num(g.current())));

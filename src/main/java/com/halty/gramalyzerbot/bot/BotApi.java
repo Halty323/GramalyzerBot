@@ -1,5 +1,6 @@
 package com.halty.gramalyzerbot.bot;
 
+import com.halty.gramalyzerbot.billing.BillingService;
 import com.halty.gramalyzerbot.bot.ui.Btn;
 import com.halty.gramalyzerbot.bot.ui.View;
 import com.halty.gramalyzerbot.config.BotProperties;
@@ -11,6 +12,7 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
+import org.telegram.telegrambots.meta.api.methods.AnswerPreCheckoutQuery;
 import org.telegram.telegrambots.meta.api.methods.GetFile;
 import org.telegram.telegrambots.meta.api.methods.GetMe;
 import org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands;
@@ -18,6 +20,9 @@ import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChat;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChatMember;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChatMemberCount;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.LeaveChat;
+import org.telegram.telegrambots.meta.api.methods.invoices.CreateInvoiceLink;
+import org.telegram.telegrambots.meta.api.methods.payments.RefundStarPayment;
+import org.telegram.telegrambots.meta.api.methods.payments.star.EditUserStarSubscription;
 import org.telegram.telegrambots.meta.api.methods.send.SendChatAction;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
@@ -27,6 +32,7 @@ import org.telegram.telegrambots.meta.api.objects.InputFile;
 import org.telegram.telegrambots.meta.api.objects.message.Message;
 import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
 import org.telegram.telegrambots.meta.api.objects.chatmember.ChatMemberAdministrator;
+import org.telegram.telegrambots.meta.api.objects.payments.LabeledPrice;
 import org.telegram.telegrambots.meta.api.objects.photo.PhotoSize;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.ReplyKeyboardMarkup;
@@ -64,7 +70,8 @@ public class BotApi {
      * See {@link BotRegistration}.
      */
     static final List<String> ALLOWED_UPDATES = List.of(
-            "message", "callback_query", "channel_post", "edited_channel_post", "my_chat_member", "message_reaction_count");
+            "message", "callback_query", "channel_post", "edited_channel_post", "my_chat_member", "message_reaction_count",
+            "pre_checkout_query");
 
     public record ChatInfo(long id, String type, String title, String username, Long linkedChatId, String description) {}
 
@@ -90,7 +97,7 @@ public class BotApi {
 
     /** The commands in Telegram's menu, in order; their descriptions are {@code cmd.<name>} in each language. */
     static final List<String> COMMANDS = List.of("menu", "overview", "times", "content", "top", "watchlist", "track", "settings",
-            "team", "channels", "import", "language", "demo", "help", "cancel");
+            "team", "channels", "import", "plan", "language", "demo", "help", "paysupport", "cancel");
 
     /** Publishes the command menu in every language and learns who we are – after startup, so a slow Telegram never delays it. */
     @EventListener(ApplicationReadyEvent.class)
@@ -297,6 +304,57 @@ public class BotApi {
             throw e;
         } catch (Exception e) {
             throw new IOException("Could not download the file: " + e.getMessage(), e);
+        }
+    }
+
+    // ------------------------------------------------------------------ Telegram Stars
+
+    /**
+     * A t.me link to a Stars subscription invoice that renews every 30 days. Subscriptions can only be sold through a
+     * link (sendInvoice has no subscription period).
+     */
+    public Optional<String> starsSubscriptionLink(String title, String description, String payload, String label, int stars) {
+        try {
+            return Optional.ofNullable(client().execute(CreateInvoiceLink.builder()
+                    .title(title).description(description).payload(payload)
+                    .providerToken("").currency("XTR")
+                    .price(new LabeledPrice(label, stars))
+                    .subscriptionPeriod(BillingService.PERIOD_SECONDS)
+                    .build()));
+        } catch (Exception e) {
+            log.warn("createInvoiceLink failed: {}", e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /** Telegram's last check before charging; it must be answered within 10 seconds. Pass null to accept. */
+    public void answerPreCheckout(String queryId, String refusal) {
+        try {
+            var b = AnswerPreCheckoutQuery.builder().preCheckoutQueryId(queryId).ok(refusal == null);
+            if (refusal != null) b.errorMessage(refusal);
+            client().execute(b.build());
+        } catch (Exception e) {
+            log.warn("answerPreCheckoutQuery failed: {}", e.getMessage());
+        }
+    }
+
+    public boolean refundStars(long userId, String chargeId) {
+        try {
+            return Boolean.TRUE.equals(client().execute(RefundStarPayment.builder().userId(userId).telegramPaymentChargeId(chargeId).build()));
+        } catch (Exception e) {
+            log.warn("refundStarPayment {} failed: {}", chargeId, e.getMessage());
+            return false;
+        }
+    }
+
+    /** Stops (or restarts) automatic renewal of a Stars subscription; the paid period runs out normally. */
+    public boolean setStarSubscriptionCanceled(long userId, String chargeId, boolean canceled) {
+        try {
+            return Boolean.TRUE.equals(client().execute(EditUserStarSubscription.builder()
+                    .userId(userId).telegramPaymentChargeId(chargeId).isCanceled(canceled).build()));
+        } catch (Exception e) {
+            log.warn("editUserStarSubscription {} failed: {}", chargeId, e.getMessage());
+            return false;
         }
     }
 

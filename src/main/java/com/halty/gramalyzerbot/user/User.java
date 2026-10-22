@@ -1,5 +1,6 @@
 package com.halty.gramalyzerbot.user;
 
+import com.halty.gramalyzerbot.billing.Plan;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -58,6 +59,22 @@ public class User {
 
     @Column(name = "state_expires_at")
     private Instant stateExpiresAt;
+
+    /** The plan last paid for; {@code BillingService.plan} says whether it's still in force. */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private Plan plan = Plan.FREE;
+
+    @Column(name = "plan_until")
+    private Instant planUntil;
+
+    /** The first payment of the running Stars subscription, which Telegram uses to cancel or resume it. */
+    @Column(name = "plan_charge_id")
+    private String planChargeId;
+
+    /** The person stopped automatic renewal; the plan still runs until {@link #planUntil}. */
+    @Column(name = "plan_canceled", nullable = false)
+    private boolean planCanceled;
 
     public User(Long telegramId, String username, String firstName) {
         this.telegramId = telegramId;

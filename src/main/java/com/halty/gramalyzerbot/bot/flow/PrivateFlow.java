@@ -60,6 +60,7 @@ public class PrivateFlow {
     private final TeamScreens team;
     private final AdminScreens admin;
     private final WatchFlow watch;
+    private final BillingFlow billing;
     private final DemoService demo;
     private final ImportService importer;
     private final PostService posts;
@@ -190,6 +191,12 @@ public class PrivateFlow {
             case "demo" -> {
                 sessions.requireMayCreate(u);
                 openDemo(u, chat);
+            }
+            case "plan", "plans", "premium", "upgrade", "subscription" -> { users.clearState(u); billing.showHome(u, chat); }
+            case "paysupport" -> billing.support(u, chat, arg);
+            case "refund" -> {
+                if (!u.isBotAdmin()) gateway.send(chat, View.of(Tr.t("flow.unknown_command")));
+                else billing.refund(u, chat, arg);
             }
             case "help" -> gateway.send(chat, start.help(access.active(u).isPresent()));
             case "cancel" -> {

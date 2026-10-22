@@ -1,5 +1,6 @@
 package com.halty.gramalyzerbot.bot.screen;
 
+import com.halty.gramalyzerbot.billing.BillingService;
 import com.halty.gramalyzerbot.i18n.Tr;
 import com.halty.gramalyzerbot.bot.ui.*;
 import com.halty.gramalyzerbot.channel.Channel;
@@ -23,13 +24,16 @@ public class AdminScreens {
     private final UserService users;
     private final ChannelService channels;
     private final BotSettings settings;
+    private final BillingService billing;
 
     public View home() {
         boolean open = settings.publicRegistration();
+        long[] month = billing.lastMonth();
         return new View().line(Tr.t("adm.title")).line(Fmt.rule())
                 .line(Tr.t("adm.users_line", Fmt.num(users.count()), users.bannedCount()))
                 .line(Tr.t("adm.channels_line", Fmt.num(channels.count())))
                 .line(Tr.t("adm.who_line", Tr.t(open ? "adm.anyone" : "adm.invited")))
+                .line(billing.enabled() ? Tr.t("adm.payments_line", month[0], Fmt.num(month[1])) : Tr.t("adm.payments_off"))
                 .row(Btn.cb(Tr.t("adm.btn.users"), "adm:users:0"), Btn.cb(Tr.t("adm.btn.channels"), "adm:chs:0"))
                 .row(Btn.cb(Tr.t(open ? "adm.btn.close" : "adm.btn.open"), "adm:reg"))
                 .row(Btn.cb(Tr.t("adm.btn.ban"), "adm:banask"))
@@ -55,7 +59,8 @@ public class AdminScreens {
         View v = new View().line("👤 <b>" + Fmt.esc(u.displayName()) + "</b>")
                 .line("ID: <code>" + u.getTelegramId() + "</code>" + (u.getUsername() != null ? " · @" + Fmt.esc(u.getUsername()) : ""))
                 .line(Tr.t("adm.user_seen", Fmt.ago(u.getCreatedAt(), Instant.now()), Fmt.ago(u.getLastSeenAt(), Instant.now())))
-                .line(Tr.t(u.isBanned() ? "adm.status.banned" : u.isBotAdmin() ? "adm.status.admin" : "adm.status.active"));
+                .line(Tr.t(u.isBanned() ? "adm.status.banned" : u.isBotAdmin() ? "adm.status.admin" : "adm.status.active"))
+                .line(Tr.t("adm.user_plan", PlanScreens.name(billing.plan(u))));
         if (!u.isBotAdmin()) {
             v.row(u.isBanned() ? Btn.cb(Tr.t("adm.btn.unban"), "adm:unban:" + u.getTelegramId()) : Btn.cb(Tr.t("adm.btn.do_ban"), "adm:ban:" + u.getTelegramId()));
         }

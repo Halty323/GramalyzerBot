@@ -2,6 +2,7 @@ package com.halty.gramalyzerbot.scheduler;
 
 import com.halty.gramalyzerbot.analytics.Report;
 import com.halty.gramalyzerbot.analytics.Schedule;
+import com.halty.gramalyzerbot.billing.BillingService;
 import com.halty.gramalyzerbot.bot.BotApi;
 import com.halty.gramalyzerbot.bot.screen.DigestBuilder;
 import com.halty.gramalyzerbot.bot.ui.Btn;
@@ -49,6 +50,7 @@ public class ScheduledJobs {
     private final PostService posts;
     private final DigestBuilder digests;
     private final BotApi gateway;
+    private final BillingService billing;
 
     @Scheduled(fixedDelayString = "PT6H", initialDelayString = "PT1M")
     public void snapshotSubscribers() {
@@ -67,6 +69,7 @@ public class ScheduledJobs {
         Instant now = Instant.now();
         for (Channel ch : channels.trackable()) {
             try {
+                if (!billing.covers(ch)) continue; // paused: the owner's plan covers fewer channels than they connected
                 digest(ch, now);
                 nudge(ch, now);
             } catch (RuntimeException e) {
