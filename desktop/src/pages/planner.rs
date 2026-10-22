@@ -1,7 +1,7 @@
 //! Planner: the week as a content calendar, the bot's best slots marked, and an AI planner that drafts a batch of posts.
 use crate::app::{App, Message, local};
 use crate::model::PostStatus;
-use crate::pages::{ai_unready_card, clip, section};
+use crate::pages::{ai_unready_card, clip, knows, section};
 use crate::theme;
 use crate::ui::*;
 use crate::view::{Choice, channel_avatar, picker};
@@ -164,7 +164,7 @@ fn ai_panel(app: &App) -> Element<'_, Message> {
     )
     .spacing(14)
     .align_y(Alignment::End);
-    let mut col = column![section(app, app.t("plan.ai_title"), Some(app.t("plan.ai_text"))), controls].spacing(14);
+    let mut col = column![section(app, app.t("plan.ai_title"), Some(app.t("plan.ai_text"))), knows(app, channel), controls].spacing(14);
     if let Some(e) = &p.error {
         col = col.push(banner(Icon::Alert, e.clone(), "danger"));
     }
@@ -174,10 +174,16 @@ fn ai_panel(app: &App) -> Element<'_, Message> {
             let check = button(container(if idea.keep { icon(Icon::Check, 13) } else { gap(13.0) }).center(16)).padding(3).style(theme::chip(idea.keep)).on_press(Message::PlanToggle(k));
             let body = column![
                 dir_row(rtl, vec![strong(idea.post.title.clone()).into(), badge(idea.post.category.clone(), "muted"), hspace(), tinted(i.when(&idea.at), "accent").size(12).into()]).spacing(8).align_y(Alignment::Center),
-                small(clip(&idea.post.body, 260)),
             ]
             .spacing(4)
             .width(Length::Fill);
+            let mut body = body;
+            if !idea.post.picture.trim().is_empty() {
+                body = body.push(dir_row(rtl, vec![icon_tinted(Icon::Image, 13, "accent"), small(format!("{}: {}", app.t("ai.picture_idea"), idea.post.picture.trim())).into()]).spacing(6).align_y(Alignment::Center));
+            }
+            if !idea.post.body.trim().is_empty() {
+                body = body.push(small(clip(&idea.post.body, 260)));
+            }
             list = list.push(container(dir_row(rtl, vec![check.into(), body.into()]).spacing(12).align_y(Alignment::Start)).padding(12).style(theme::inset).width(Length::Fill));
         }
         let keep = p.ideas.iter().filter(|x| x.keep).count() as i64;

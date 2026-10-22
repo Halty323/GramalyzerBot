@@ -1,7 +1,7 @@
 //! The application: its state, the messages that change it, and `update`. Views live in view.rs and pages/.
 use crate::ai::{self, AiConfig, ChatMessage, PlannedPost};
 use crate::api::{ApiError, Client};
-use crate::config::Config;
+use crate::config::{self, Config, SavedLook};
 use crate::i18n::{self, I18n};
 use crate::model::*;
 use crate::prompts;
@@ -228,6 +228,7 @@ pub struct SettingsForm {
     pub base_url: String,
     pub api_key: String,
     pub model: String,
+    pub vision_model: String,
     pub models: Vec<String>,
     pub loading_models: bool,
     pub ai_test: Option<Result<String, String>>,
@@ -253,6 +254,11 @@ pub struct App {
     pub insights: HashMap<String, Result<Insights, ApiError>>,
     /// Each own channel's recent Telegram posts, so AI writes like the channel.
     pub feeds: HashMap<String, ChannelFeed>,
+    /// What each channel's pictures show, from the model for pictures, and the channels it is looking at now.
+    pub looks: HashMap<String, SavedLook>,
+    pub looking: HashSet<String>,
+    /// Whether the AI panels show what the AI knows of the channel in full.
+    pub knows_open: bool,
     pub photos: HashMap<String, image::Handle>,
     requested_photos: HashSet<String>,
     pub page: Page,
@@ -280,6 +286,9 @@ pub enum Message {
     Tracked(Result<Vec<TrackedSummary>, ApiError>),
     InsightsLoaded(String, Result<Insights, ApiError>),
     FeedLoaded(String, Result<ChannelFeed, ApiError>),
+    Looked(String, String, Result<String, String>),
+    LookAgain(String),
+    KnowsToggle,
     Photo(String, Option<Vec<u8>>),
     Navigate(Page),
     SelectChannel(Option<String>),
@@ -386,6 +395,7 @@ pub enum Message {
     ApiKey(String),
     ShowKey(bool),
     Model(String),
+    VisionModel(String),
     LoadModels,
     Models(Result<Vec<String>, String>),
     TestAi,
@@ -443,6 +453,7 @@ impl App {
             base_url: s.ai.base_url.clone(),
             api_key: s.ai.api_key.clone(),
             model: s.ai.model.clone(),
+            vision_model: s.ai.vision().to_string(),
             models: vec![],
             loading_models: false,
             ai_test: None,
@@ -464,6 +475,9 @@ impl App {
             tracked: None,
             insights: HashMap::new(),
             feeds: HashMap::new(),
+            looks: config::load_looks(),
+            looking: HashSet::new(),
+            knows_open: false,
             photos: HashMap::new(),
             requested_photos: HashSet::new(),
             page: Page::Dashboard,
@@ -597,6 +611,39 @@ impl App {
         Task::batch(tasks)
     }
 
+    /// Asks the model for pictures what a channel's pictures show, unless a fresh enough answer is remembered.
+    fn want_look(&mut self, id: &str, force: bool) -> Task<Message> {
+        const FRESH: i64 = 3 * 86400;
+        const RETRY: i64 = 6 * 3600;
+        let cfg = self.config.ai.clone();
+        if !cfg.ready() || cfg.vision().is_empty() || self.looking.contains(id) {
+            return Task::none();
+        }
+        let (Some(channel), Some(feed)) = (self.channel_by_id(id), self.feeds.get(id)) else { return Task::none() };
+        let pictures = prompts::pictures_of(&feed.posts);
+        if pictures.is_empty() {
+            return Task::none();
+        }
+        let key = look_key(&cfg);
+        let fresh = self.looks.get(id).filter(|s| s.key == key).is_some_and(|s| {
+            let age = chrono::Utc::now().timestamp() - s.at;
+            (s.text.is_some() && age < FRESH) || (s.error.is_some() && age < RETRY)
+        });
+        if fresh && !force {
+            return Task::none();
+        }
+        let prompt = prompts::look_prompt(channel, &pictures);
+        let urls: Vec<String> = pictures.iter().filter_map(|p| p.media_url.clone()).collect();
+        let id = id.to_string();
+        self.looking.insert(id.clone());
+        Task::perform(ai::look(cfg, prompt, urls), move |r| Message::Looked(id.clone(), key.clone(), r))
+    }
+
+    fn want_looks(&mut self) -> Task<Message> {
+        let ids: Vec<String> = self.feeds.keys().cloned().collect();
+        Task::batch(ids.iter().map(|id| self.want_look(id, false)).collect::<Vec<_>>())
+    }
+
     fn want_photo(&mut self, url: Option<String>) -> Task<Message> {
         let Some(url) = url else { return Task::none() };
         if !self.requested_photos.insert(url.clone()) {
@@ -646,6 +693,7 @@ impl App {
             posts: self.posts(),
             feed: channel.and_then(|c| self.feeds.get(&c.id)).map(|f| f.posts.as_slice()).unwrap_or(&[]),
             voice: &self.config.brand_voice,
+            look: channel.filter(|_| !self.config.ai.vision().is_empty()).and_then(|c| self.looks.get(&c.id)).and_then(|s| s.text.as_deref()),
             language: self.content_lang_name(),
             language_from_posts: self.config.content_lang.is_empty(),
         }
@@ -776,9 +824,21 @@ impl App {
             Message::FeedLoaded(id, r) => {
                 // Without a feed the AI still has the description and the workspace posts to go on.
                 if let Ok(f) = r {
-                    self.feeds.insert(id, f);
+                    self.feeds.insert(id.clone(), f);
+                    return self.want_look(&id, false);
                 }
             }
+            Message::Looked(id, key, r) => {
+                self.looking.remove(&id);
+                let (text, error) = match r {
+                    Ok(t) => (Some(t), None),
+                    Err(e) => (None, Some(e)),
+                };
+                self.looks.insert(id, SavedLook { key, at: chrono::Utc::now().timestamp(), text, error });
+                return Task::perform(config::save_looks(self.looks.clone()), Message::Saved);
+            }
+            Message::LookAgain(id) => return self.want_look(&id, true),
+            Message::KnowsToggle => self.knows_open = !self.knows_open,
             Message::Photo(url, bytes) => {
                 if let Some(b) = bytes {
                     self.photos.insert(url, image::Handle::from_bytes(b));
@@ -1057,7 +1117,15 @@ impl App {
                 return self.stream(AiSlot::Studio, g, messages, if kind == Rewrite::Grammar { 0.2 } else { 0.8 });
             }
             Message::ApplyAi(mode) => {
-                let out = self.studio.ai.output.trim().to_string();
+                let mut out = self.studio.ai.output.trim().to_string();
+                // A draft for a picture channel ends with the picture to attach: it becomes the title, not text.
+                if self.studio.last_rewrite == Some(Rewrite::Draft) && matches!(mode, ApplyMode::Replace | ApplyMode::Append) {
+                    let (text, picture) = prompts::split_picture(&out);
+                    if !picture.is_empty() && self.studio.title.trim().is_empty() {
+                        self.studio.title = format!("{} {picture}", prompts::PICTURE_MARK).chars().take(180).collect();
+                    }
+                    out = text;
+                }
                 match mode {
                     ApplyMode::Replace => {
                         self.studio.body = text_editor::Content::with_text(&out);
@@ -1165,13 +1233,19 @@ impl App {
                     .ideas
                     .iter()
                     .filter(|i| i.keep)
-                    .map(|i| PostInput {
-                        channel_id: channel.clone(),
-                        title: if i.post.title.trim().is_empty() { i.post.body.chars().take(60).collect() } else { i.post.title.chars().take(180).collect() },
-                        body: i.post.body.chars().take(4096).collect(),
-                        scheduled_at: i.at.to_utc().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-                        status: PostStatus::Draft,
-                        category: if i.post.category.trim().is_empty() { "AI plan".into() } else { i.post.category.chars().take(40).collect() },
+                    .map(|i| {
+                        // A picture post's title says what picture to attach; one with no caption keeps that as its text until edited.
+                        let picture = i.post.picture.trim();
+                        let mark = format!("{} {picture}", prompts::PICTURE_MARK);
+                        let title = if !picture.is_empty() { mark.chars().take(180).collect() } else if i.post.title.trim().is_empty() { i.post.body.chars().take(60).collect() } else { i.post.title.chars().take(180).collect() };
+                        PostInput {
+                            channel_id: channel.clone(),
+                            title,
+                            body: if i.post.body.trim().is_empty() { mark.clone() } else { i.post.body.chars().take(4096).collect() },
+                            scheduled_at: i.at.to_utc().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                            status: PostStatus::Draft,
+                            category: if i.post.category.trim().is_empty() { "AI plan".into() } else { i.post.category.chars().take(40).collect() },
+                        }
                     })
                     .collect();
                 if inputs.is_empty() {
@@ -1299,15 +1373,15 @@ impl App {
                 self.viewer.loading = false;
                 match r {
                     Ok(l) => {
-                        let photo = match &l {
-                            Loaded::Detail(d) => self.tracked_photo(&d.channel),
+                        let (photo, look) = match &l {
+                            Loaded::Detail(d) => (self.tracked_photo(&d.channel), Task::none()),
                             Loaded::Feed(f) => {
                                 self.feeds.insert(f.channel_id.clone(), f.clone());
-                                None
+                                (None, self.want_look(&f.channel_id, false))
                             }
                         };
                         self.viewer.loaded = Some(l);
-                        return self.want_photo(photo);
+                        return Task::batch([self.want_photo(photo), look]);
                     }
                     Err(e) => self.viewer.error = Some(e),
                 }
@@ -1477,6 +1551,7 @@ impl App {
                     self.settings.base_url = p.base_url.to_string();
                 }
                 self.settings.model = p.model.to_string();
+                self.settings.vision_model = p.vision.to_string();
                 self.settings.models.clear();
                 self.settings.ai_test = None;
             }
@@ -1484,6 +1559,7 @@ impl App {
             Message::ApiKey(s) => self.settings.api_key = s,
             Message::ShowKey(b) => self.settings.show_key = b,
             Message::Model(s) => self.settings.model = s,
+            Message::VisionModel(s) => self.settings.vision_model = s,
             Message::LoadModels => {
                 self.settings.loading_models = true;
                 return Task::perform(ai::models(self.ai_form()), Message::Models);
@@ -1508,7 +1584,9 @@ impl App {
             Message::SaveAi => {
                 self.config.ai = self.ai_form();
                 self.toast(self.t("toast.settings_saved"));
-                return self.save_config();
+                // A new model for pictures (or the first one) looks at every channel's.
+                let looks = self.want_looks();
+                return Task::batch([self.save_config(), looks]);
             }
             Message::BrandVoice(a) => self.settings.brand_voice.perform(a),
             Message::ContentLang(s) => self.settings.content_lang = s,
@@ -1533,7 +1611,13 @@ impl App {
     }
 
     fn ai_form(&self) -> AiConfig {
-        AiConfig { provider: self.settings.provider.clone(), base_url: self.settings.base_url.trim().to_string(), api_key: self.settings.api_key.trim().to_string(), model: self.settings.model.trim().to_string() }
+        AiConfig {
+            provider: self.settings.provider.clone(),
+            base_url: self.settings.base_url.trim().to_string(),
+            api_key: self.settings.api_key.trim().to_string(),
+            model: self.settings.model.trim().to_string(),
+            vision_model: Some(self.settings.vision_model.trim().to_string()),
+        }
     }
 
     fn fill_channel_form(&mut self, c: &Channel) {
@@ -1585,6 +1669,11 @@ impl App {
         }
         Subscription::batch(subs)
     }
+}
+
+/// Which endpoint and model described a channel's pictures: when either changes, they are looked at again.
+pub fn look_key(cfg: &AiConfig) -> String {
+    format!("{}|{}", cfg.base_url.trim(), cfg.vision())
 }
 
 pub fn status_key(s: PostStatus) -> &'static str {

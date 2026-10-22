@@ -10,7 +10,8 @@ pub mod viewer;
 pub mod watchlist;
 
 use crate::app::{AiRun, AiSlot, App, Message, SettingsTab, local, status_key};
-use crate::model::{Post, PostStatus};
+use crate::model::{Channel, Post, PostStatus};
+use crate::prompts;
 use crate::theme;
 use crate::ui::*;
 use crate::view::channel_avatar;
@@ -103,6 +104,62 @@ pub fn ai_output<'a>(app: &'a App, run: &'a AiRun, slot: AiSlot, max_height: f32
         col = col.push(banner(Icon::Alert, e.clone(), "danger"));
     }
     Some(container(col).padding(14).style(theme::inset).width(Length::Fill).into())
+}
+
+/// What the AI has read of the channel and seen of its pictures, and why when it hasn't: one line, opened for more.
+pub fn knows<'a>(app: &'a App, channel: &'a Channel) -> Element<'a, Message> {
+    let rtl = app.rtl();
+    let i = &app.i18n;
+    let feed = app.feeds.get(&channel.id).map(|f| f.posts.as_slice()).unwrap_or(&[]);
+    let own = prompts::own_posts(feed);
+    let pictures = own.iter().filter(|p| prompts::is_picture(p)).count() as i64;
+    let visible = !prompts::pictures_of(feed).is_empty();
+    let vision = app.config.ai.vision();
+    let saved = app.looks.get(&channel.id);
+    let again = || btn(Some(Icon::Refresh), app.t("ai.look_again"), theme::ghost, Some(Message::LookAgain(channel.id.clone()))).into();
+    let settings = || btn(Some(Icon::Settings), app.t("ai.open_settings"), theme::ghost, Some(Message::SettingsTab(SettingsTab::Ai))).into();
+    let mut summary = vec![];
+    let mut more: Vec<Element<Message>> = vec![];
+    if own.is_empty() {
+        summary.push(app.t("ai.knows_none"));
+        more.push(small(app.t("ai.knows_none_text")).into());
+    } else {
+        summary.push(i.tn("ai.knows_posts", own.len() as i64));
+        if pictures > 0 {
+            summary.push(i.tn("ai.knows_pictures", pictures));
+        }
+        if pictures > 0 && !visible {
+            summary.push(app.t("ai.look_hidden"));
+            more.push(small(app.t("ai.look_hidden_text")).into());
+        } else if visible && vision.is_empty() {
+            summary.push(app.t("ai.look_off"));
+            more.push(small(app.t("ai.look_off_text")).into());
+            more.push(dir_row(rtl, vec![settings()]).into());
+        } else if visible && app.looking.contains(&channel.id) {
+            summary.push(app.t("ai.look_pending"));
+        } else if let Some(text) = saved.and_then(|s| s.text.as_deref()).filter(|_| visible) {
+            summary.push(app.t("ai.look_ready"));
+            more.push(strong(app.t("ai.look_title")).size(12.5).into());
+            more.push(small(text).into());
+            more.push(dir_row(rtl, vec![again()]).into());
+        } else if let Some(e) = saved.and_then(|s| s.error.as_deref()).filter(|_| visible) {
+            summary.push(app.t("ai.look_failed_short"));
+            more.push(small(i.tv("ai.look_failed", &[("model", vision)])).into());
+            more.push(small(e).into());
+            more.push(dir_row(rtl, vec![again(), settings()]).spacing(4).into());
+        }
+    }
+    let open = app.knows_open && !more.is_empty();
+    let mut line = vec![icon_tinted(Icon::Image, 14, "accent"), container(small(summary.join(" · "))).width(Length::Fill).align_x(start(rtl)).into()];
+    if !more.is_empty() {
+        line.push(icon(if open { Icon::ChevronDown } else if rtl { Icon::ChevronLeft } else { Icon::ChevronRight }, 14));
+    }
+    let head = button(dir_row(rtl, line).spacing(8).align_y(Alignment::Center)).padding(0).style(theme::ghost).on_press_maybe((!more.is_empty()).then_some(Message::KnowsToggle));
+    let mut col = column![head].spacing(8);
+    if open {
+        col = col.push(column(more).spacing(6));
+    }
+    container(col).padding(Padding::from([8, 10])).style(theme::inset).width(Length::Fill).into()
 }
 
 /// Shortens text to n characters with an ellipsis.

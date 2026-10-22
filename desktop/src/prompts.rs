@@ -14,6 +14,8 @@ pub struct Context<'a> {
     /// The channel's own published posts as Telegram has them, newest first.
     pub feed: &'a [FeedPost],
     pub voice: &'a str,
+    /// What the channel's pictures show, as a model that can see images described them; None when nobody looked.
+    pub look: Option<&'a str>,
     pub language: String,
     /// No language was chosen for drafts: write in the language of the channel's posts, `language` without any.
     pub language_from_posts: bool,
@@ -45,9 +47,48 @@ Do not drift into generic topics (marketing, growth, AI, productivity, motivatio
 Write posts the way the channel's own posts are written: similar length, structure, emoji and hashtag habits, and voice. \
 Reuse the channel's hashtags rather than inventing new ones.";
 
-/// How many of the channel's posts go into a prompt as examples, and how much of each.
-const EXAMPLES: usize = 6;
+/// How many of the channel's posts go into a prompt as examples, how much of each, and of all of them together.
+const EXAMPLES: usize = 10;
 const EXAMPLE_CHARS: usize = 600;
+const EXAMPLE_BUDGET: usize = 3600;
+
+fn kind_name(kind: &str) -> &'static str {
+    match kind {
+        "TEXT" => "text",
+        "PHOTO" => "photo",
+        "ALBUM" => "album",
+        "VIDEO" => "video",
+        "ANIMATION" => "GIF",
+        "VIDEO_NOTE" => "video message",
+        "STICKER" => "sticker",
+        "VOICE" => "voice message",
+        "AUDIO" => "audio",
+        "DOCUMENT" => "file",
+        "POLL" => "poll",
+        _ => "other",
+    }
+}
+
+/// Posts that are mainly something to look at: a photo, an album, a video, a GIF or a sticker.
+pub fn is_picture(p: &FeedPost) -> bool {
+    matches!(p.kind.as_str(), "PHOTO" | "ALBUM" | "VIDEO" | "ANIMATION" | "VIDEO_NOTE" | "STICKER")
+}
+
+/// The channel's own posts: forwards are someone else's style, and an empty text post says nothing.
+pub fn own_posts(feed: &[FeedPost]) -> Vec<&FeedPost> {
+    feed.iter().filter(|p| p.forwarded_from.is_none() && (!p.text.trim().is_empty() || p.kind != "TEXT")).collect()
+}
+
+/// The share of the channel's posts that are pictures, 0 to 1.
+pub fn picture_share(feed: &[FeedPost]) -> f64 {
+    let own = own_posts(feed);
+    if own.is_empty() { 0.0 } else { own.iter().filter(|p| is_picture(p)).count() as f64 / own.len() as f64 }
+}
+
+/// Picture channels: most posts are pictures with a short caption or none.
+fn is_picture_channel(ctx: &Context) -> bool {
+    own_posts(ctx.feed).len() >= 3 && picture_share(ctx.feed) >= 0.5
+}
 
 fn day_name(day: &str) -> String {
     let mut s = day.to_lowercase();
@@ -80,18 +121,23 @@ fn hashtags(text: &str) -> impl Iterator<Item = String> + '_ {
         .map(|t| format!("#{}", t.to_lowercase()))
 }
 
-/// The channel's own posts that are worth imitating: the most engaging ones first, then the newest.
+/// The channel's own posts that are worth imitating: the most engaging ones first, then the newest. Picture posts
+/// count too, with whatever caption they have: in a channel of pictures they are the style to learn.
 fn examples<'a>(feed: &'a [FeedPost]) -> Vec<&'a FeedPost> {
-    let own: Vec<&FeedPost> = feed.iter().filter(|p| p.forwarded_from.is_none() && p.text.trim().chars().count() >= 20).collect();
+    let own = own_posts(feed);
     let mut best = own.clone();
     best.sort_by(|a, b| b.reactions.cmp(&a.reactions));
     let opening = |p: &FeedPost| p.text.trim().lines().next().unwrap_or("").trim().to_lowercase();
     let mut out: Vec<&FeedPost> = Vec::new();
+    let mut budget = EXAMPLE_BUDGET;
     // Recurring formats (a weekly digest, say) would otherwise fill every slot with the same opening.
-    let add = |p: &'a FeedPost, out: &mut Vec<&'a FeedPost>| {
-        if !out.iter().any(|q| q.id == p.id || opening(q) == opening(p)) {
-            out.push(p);
+    let mut add = |p: &'a FeedPost, out: &mut Vec<&'a FeedPost>| {
+        let (o, cost) = (opening(p), p.text.trim().chars().count().min(EXAMPLE_CHARS) + 30);
+        if out.iter().any(|q| q.id == p.id || (!o.is_empty() && opening(q) == o)) || (out.len() >= 3 && cost > budget) {
+            return;
         }
+        out.push(p);
+        budget = budget.saturating_sub(cost);
     };
     for p in best {
         if out.len() >= EXAMPLES / 2 {
@@ -106,6 +152,44 @@ fn examples<'a>(feed: &'a [FeedPost]) -> Vec<&'a FeedPost> {
         add(p, &mut out);
     }
     out
+}
+
+/// What the channel posts, in numbers: formats, and for pictures how long their captions are.
+fn content_mix(feed: &[FeedPost]) -> Option<String> {
+    let own = own_posts(feed);
+    if own.len() < 3 {
+        return None;
+    }
+    let mut counts: Vec<(&str, usize)> = Vec::new();
+    for p in &own {
+        let k = kind_name(&p.kind);
+        match counts.iter_mut().find(|(n, _)| *n == k) {
+            Some((_, c)) => *c += 1,
+            None => counts.push((k, 1)),
+        }
+    }
+    counts.sort_by(|a, b| b.1.cmp(&a.1));
+    let pct = |n: usize, of: usize| (n as f64 * 100.0 / of as f64).round() as usize;
+    let mix: Vec<String> = counts.iter().take(5).map(|(k, n)| format!("{k} {}%", pct(*n, own.len()))).collect();
+    let mut line = format!("Formats of the last {} posts: {}.", own.len(), mix.join(", "));
+    let pictures: Vec<&&FeedPost> = own.iter().filter(|p| is_picture(p)).collect();
+    if !pictures.is_empty() {
+        let mut captions: Vec<usize> = pictures.iter().map(|p| p.text.trim().chars().count()).filter(|&n| n > 0).collect();
+        captions.sort_unstable();
+        let _ = write!(line, " Of the picture posts, {}% have no caption", pct(pictures.len() - captions.len(), pictures.len()));
+        match captions.get(captions.len() / 2) {
+            Some(n) => { let _ = write!(line, "; captions are typically about {n} characters."); }
+            None => line.push('.'),
+        }
+    }
+    Some(line)
+}
+
+/// One post as an example: what it is, how it did, and its text.
+fn example(s: &mut String, p: &FeedPost, n: usize) {
+    let text = p.text.trim();
+    let text = if text.is_empty() { "(no caption)".to_string() } else { clip(text, EXAMPLE_CHARS) };
+    let _ = writeln!(s, "[{n}] {}, {} reactions\n{text}\n", kind_name(&p.kind), p.reactions);
 }
 
 /// Habits the posts share, in numbers: length, emoji, hashtags, links.
@@ -157,7 +241,7 @@ pub fn describe(ctx: &Context) -> String {
         if !examples.is_empty() {
             let _ = writeln!(s, "\nPosts from this channel, to learn its subject, voice and formatting (the most engaging first, then the newest):");
             for (n, p) in examples.iter().enumerate() {
-                let _ = writeln!(s, "[{}] {} reactions\n{}\n", n + 1, p.reactions, clip(&p.text, EXAMPLE_CHARS));
+                example(&mut s, p, n + 1);
             }
         } else {
             // Nothing from Telegram yet: the posts written in the workspace are the next best thing.
@@ -169,8 +253,14 @@ pub fn describe(ctx: &Context) -> String {
                 }
             }
         }
+        if let Some(mix) = content_mix(ctx.feed) {
+            let _ = writeln!(s, "{mix}");
+        }
         if let Some(style) = house_style(ctx.feed) {
             let _ = writeln!(s, "{style}");
+        }
+        if let Some(look) = ctx.look.map(str::trim).filter(|l| !l.is_empty()) {
+            let _ = writeln!(s, "\nWhat the channel's pictures show (from looking at recent ones):\n{look}\n");
         }
         let planned: Vec<&str> = mine.iter().filter(|p| p.status != PostStatus::Published).map(|p| p.title.trim()).filter(|t| !t.is_empty()).take(8).collect();
         if !planned.is_empty() {
@@ -210,9 +300,20 @@ pub fn describe(ctx: &Context) -> String {
     s
 }
 
+const PICTURES: &str = "Most of this channel's posts are pictures with a short caption or none: the picture carries the post. \
+Gramalyzer sends only the text, so write what goes with a picture: as short as the channel's captions, in their voice, \
+about the kind of thing its pictures show. Never turn that into a long text post the channel would not publish.";
+
+/// Marks the line where a draft for a picture channel says what picture to attach.
+pub const PICTURE_MARK: &str = "🖼";
+
 fn system(ctx: &Context, extra: &str) -> ChatMessage {
     let about = describe(ctx);
-    let fit = if ctx.channel.is_some() { FIT } else { "" };
+    let fit = match ctx.channel {
+        Some(_) if is_picture_channel(ctx) => format!("{FIT}\n{PICTURES}"),
+        Some(_) => FIT.to_string(),
+        None => String::new(),
+    };
     let has_posts = !ctx.feed.is_empty() || ctx.channel.is_some_and(|c| ctx.posts.iter().any(|p| p.channel_id == c.id && p.status == PostStatus::Published));
     let language = if ctx.language_from_posts && has_posts {
         "Write in the language the channel's posts are written in, unless asked otherwise.".to_string()
@@ -225,6 +326,7 @@ fn system(ctx: &Context, extra: &str) -> ChatMessage {
 pub fn rewrite(ctx: &Context, kind: Rewrite, title: &str, body: &str, brief: &str, tone: &str, target: &str) -> Vec<ChatMessage> {
     let only = "Answer with the post text only: no preface, no quotes around it, no explanation.";
     let task = match kind {
+        Rewrite::Draft if is_picture_channel(ctx) => format!("Write a new post for this channel from the brief below: the caption, as short as the channel's captions and in their voice, then on a last line starting with \"{PICTURE_MARK} \" what picture to attach, in a few words. No preface, no quotes, no explanation.\n\nBrief: {brief}"),
         Rewrite::Draft => format!("Write a new Telegram post for this channel from the brief below, on the channel's subject and in the style of its posts. Open with a strong first line (it is what shows in the chat list), keep paragraphs short, end with a natural call to action or question. {only}\n\nBrief: {brief}"),
         Rewrite::Improve => format!("Edit this post to make it clearer, tighter and more engaging, keeping its meaning, facts and language. {only}"),
         Rewrite::Shorten => format!("Cut this post to about half its length without losing the key point. {only}"),
@@ -251,14 +353,18 @@ pub fn plan(ctx: &Context, count: usize, brief: &str) -> Vec<ChatMessage> {
     } else {
         brief.trim().to_string()
     };
+    let ask = if is_picture_channel(ctx) {
+        "Every post must be on the channel's subject and look like its own posts: a picture and its caption. \
+         Write each caption in full, as short as the channel's. Return ONLY a JSON array, no prose, like:\n\
+         [{\"title\": \"short internal title\", \"picture\": \"what the picture should show\", \"category\": \"one or two words\", \"body\": \"the caption\"}]"
+    } else {
+        "Every post must be on the channel's subject and read like its own posts. \
+         Write each post in full, ready to publish. Return ONLY a JSON array, no prose, like:\n\
+         [{\"title\": \"short internal title\", \"category\": \"one or two words\", \"body\": \"the full post text\"}]"
+    };
     vec![
         system(ctx, "You plan content calendars. Base ideas on the channel's subject and on what the analytics show working; vary formats; never repeat a recent post."),
-        ChatMessage::user(format!(
-            "Plan the next {count} posts for this channel. Focus: {brief}\n\
-             Every post must be on the channel's subject and read like its own posts. \
-             Write each post in full, ready to publish. Return ONLY a JSON array, no prose, like:\n\
-             [{{\"title\": \"short internal title\", \"category\": \"one or two words\", \"body\": \"the full post text\"}}]"
-        )),
+        ChatMessage::user(format!("Plan the next {count} posts for this channel. Focus: {brief}\n{ask}")),
     ]
 }
 
@@ -284,7 +390,12 @@ pub fn assistant(ctx: &Context, tracked: &[TrackedSummary], history: &[ChatMessa
         .map(|c| ctx.posts.iter().filter(|p| p.channel_id == c.id && p.status == PostStatus::Scheduled).filter_map(|p| local(&p.scheduled_at).map(|d| format!("- {} {}", d.format("%a %d %b %H:%M"), p.title))).collect::<Vec<_>>())
         .unwrap_or_default();
     let queue = if scheduled.is_empty() { "Queue: nothing scheduled.".to_string() } else { format!("Queue:\n{}", scheduled.join("\n")) };
-    let mut messages = vec![system(ctx, &format!("{watch}{queue}\nYou are a helpful assistant in a chat. When you write a post, put it in full, ready to paste."))];
+    let pictures = if is_picture_channel(ctx) {
+        format!(" This channel posts pictures: when you suggest a post, write its caption and say what picture goes with it on a separate line starting with \"{PICTURE_MARK} \".")
+    } else {
+        String::new()
+    };
+    let mut messages = vec![system(ctx, &format!("{watch}{queue}\nYou are a helpful assistant in a chat. When you write a post, put it in full, ready to paste.{pictures}"))];
     messages.extend(history.iter().rev().take(16).rev().cloned());
     messages
 }
@@ -294,10 +405,11 @@ pub fn teardown(ctx: &Context, title: &str, posts: &[FeedPost], stats: Option<&T
     if let Some(st) = stats {
         let _ = writeln!(s, "Subscribers {}, avg views {}, ER {}%, posts/day {}", opt(st.subscribers), opt_f(st.avg_views), opt_f(st.er), opt_f(st.posts_per_day));
     }
-    let _ = writeln!(s, "Recent posts (views, reactions):");
+    let _ = writeln!(s, "Recent posts (format, views, reactions):");
     for p in posts.iter().take(20) {
         let text: String = p.text.chars().take(220).collect::<String>().replace('\n', " ");
-        let _ = writeln!(s, "- [{} views, {} reactions] {}", p.views.map(|v| v.to_string()).unwrap_or("?".into()), p.reactions, text);
+        let text = if text.trim().is_empty() { "(no caption)" } else { &text };
+        let _ = writeln!(s, "- [{}, {} views, {} reactions] {text}", kind_name(&p.kind), p.views.map(|v| v.to_string()).unwrap_or("?".into()), p.reactions);
     }
     vec![
         system(ctx, "You analyse other Telegram channels so the user can learn from them."),
@@ -325,12 +437,67 @@ fn opt_f(v: Option<f64>) -> String {
     v.map(|v| format!("{v:.1}")).unwrap_or_else(|| "?".into())
 }
 
-/// A title and body from an assistant answer: the first short line becomes the title.
+/// A draft and the picture it asks for: the lines marked 🖼 come out of the text.
+pub fn split_picture(answer: &str) -> (String, String) {
+    let lines: Vec<&str> = answer.trim().lines().collect();
+    let marked = |l: &&&str| l.trim().starts_with(PICTURE_MARK);
+    let text = lines.iter().filter(|l| !marked(l)).copied().collect::<Vec<_>>().join("\n").trim().to_string();
+    let picture: Vec<&str> = lines
+        .iter()
+        .filter(marked)
+        .map(|l| l.trim()[PICTURE_MARK.len()..].trim_start_matches(|c: char| c.is_whitespace() || matches!(c, '\u{FE0F}' | ':' | '：' | '-')).trim())
+        .filter(|p| !p.is_empty())
+        .collect();
+    (text, picture.join("; "))
+}
+
+/// A title and body from an answer: the first short line becomes the title, or the picture it asks for.
 pub fn split_title(answer: &str) -> (String, String) {
-    let body = answer.trim().to_string();
+    let (body, picture) = split_picture(answer);
     let first: String = body.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("").chars().filter(|c| !matches!(c, '*' | '#' | '"')).collect();
-    let title: String = first.trim().chars().take(70).collect();
-    (title, body)
+    let title = if picture.is_empty() { first.trim().to_string() } else { format!("{PICTURE_MARK} {picture}") };
+    (title.chars().take(70).collect(), body)
+}
+
+/// The pictures a model looks at to describe a channel's: its two most engaging, then the newest, never forwards.
+pub fn pictures_of(feed: &[FeedPost]) -> Vec<&FeedPost> {
+    const SEEN: usize = 4;
+    let own: Vec<&FeedPost> = feed.iter().filter(|p| p.forwarded_from.is_none() && is_picture(p) && p.media_url.as_deref().is_some_and(|u| !u.is_empty())).collect();
+    let mut best = own.clone();
+    best.sort_by(|a, b| b.reactions.cmp(&a.reactions));
+    let mut out: Vec<&FeedPost> = best.into_iter().take(SEEN / 2).collect();
+    for p in own {
+        if out.len() >= SEEN {
+            break;
+        }
+        if !out.iter().any(|q| q.id == p.id) {
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// What the model for pictures is asked about them.
+pub fn look_prompt(channel: &Channel, posts: &[&FeedPost]) -> String {
+    let about = if channel.description.trim().is_empty() { String::new() } else { format!(" It describes itself as: {}", channel.description.trim()) };
+    let captions: Vec<String> = posts
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let t = p.text.trim();
+            if t.is_empty() { format!("{}) (no caption)", i + 1) } else { format!("{}) \"{}\"", i + 1, t.chars().take(200).collect::<String>()) }
+        })
+        .collect();
+    format!(
+        "These are {} recent pictures from the Telegram channel \"{}\" ({}).{about}\nTheir captions, in order:\n{}\n\n\
+         In 4 to 6 short lines starting with \"- \", describe what this channel's pictures are like, so a copywriter can write posts that fit: \
+         their subjects and recurring themes, the humour or mood, the visual style (photos, memes, screenshots, illustrations…), \
+         any text on them and its language, and what makes them recognisable. Describe what they have in common, not each picture. Plain text, no preface.",
+        posts.len(),
+        channel.name,
+        channel.handle,
+        captions.join("\n")
+    )
 }
 
 #[cfg(test)]
@@ -368,6 +535,7 @@ mod tests {
             reactions,
             reaction_list: vec![],
             comments: None,
+            media_url: None,
             url: None,
             forwarded_from: None,
             edited: false,
@@ -377,7 +545,7 @@ mod tests {
     #[test]
     fn context_mentions_channel_and_voice() {
         let c = channel();
-        let ctx = Context { channel: Some(&c), insights: None, posts: &[], feed: &[], voice: "warm, no jargon", language: "Ukrainian".into(), language_from_posts: false };
+        let ctx = Context { channel: Some(&c), insights: None, posts: &[], feed: &[], voice: "warm, no jargon", look: None, language: "Ukrainian".into(), language_from_posts: false };
         let m = rewrite(&ctx, Rewrite::Shorten, "T", "Body", "", "friendly", "English");
         assert!(m[0].content.contains("Design Notes"));
         assert!(m[0].content.contains("warm, no jargon"));
@@ -401,13 +569,13 @@ mod tests {
         ];
         feed.push(FeedPost { forwarded_from: Some("Other".into()), ..feed_post("8", "A forwarded post about crypto airdrops", 999) });
         feed.push(feed_post("9", "Kerning matters 🎨\n\nThe same series again. #typography", 250));
-        let ctx = Context { channel: Some(&c), insights: None, posts: &[], feed: &feed, voice: "", language: "English".into(), language_from_posts: true };
+        let ctx = Context { channel: Some(&c), insights: None, posts: &[], feed: &feed, voice: "", look: None, language: "English".into(), language_from_posts: true };
         let sys = &plan(&ctx, 3, "")[0].content;
         // the most engaging posts come first, then the newest; forwards are someone else's words
-        let p2 = sys.find("[1] 300 reactions").expect("best post first");
-        assert!(sys[p2..].contains("[2] 90 reactions") && sys.contains("[3] 40 reactions") && sys.contains("[4] 5 reactions\nMoodboard"));
+        let p2 = sys.find("[1] text, 300 reactions").expect("best post first");
+        assert!(sys[p2..].contains("[2] text, 90 reactions") && sys.contains("[3] text, 40 reactions") && sys.contains("[6] text, 5 reactions\nMoodboard"));
         assert!(!sys.contains("crypto") && !sys.contains("same series"));
-        assert!(!sys.contains("[7]"));
+        assert!(!sys.contains("[8]"));
         assert!(sys.contains("Five typefaces") && sys.contains("All free for commercial use"));
         assert!(sys.contains("Letter pairs need care") && !sys.contains(&long), "long posts are clipped");
         assert!(sys.contains("most used: #typography #inspiration #branding #ux"));
@@ -418,6 +586,69 @@ mod tests {
         // with no posts at all there is nothing to copy the language from
         let ctx = Context { feed: &[], ..ctx };
         assert!(plan(&ctx, 3, "")[0].content.contains("Write in English"));
+    }
+
+    fn picture(id: &str, text: &str, reactions: i64, kind: &str) -> FeedPost {
+        FeedPost { kind: kind.into(), media_url: Some(format!("https://cdn.example/{id}.jpg")), ..feed_post(id, text, reactions) }
+    }
+
+    fn memes() -> Vec<FeedPost> {
+        vec![
+            picture("m1", "", 900, "PHOTO"),
+            picture("m2", "когда пятница", 700, "PHOTO"),
+            picture("m3", "", 300, "PHOTO"),
+            picture("m4", "мем дня", 200, "ALBUM"),
+            feed_post("t1", "Канал о мемах про котов, без политики", 50),
+            picture("m5", "", 100, "VIDEO"),
+        ]
+    }
+
+    #[test]
+    fn picture_posts_reach_the_prompt() {
+        let c = channel();
+        let feed = memes();
+        let ctx = Context { channel: Some(&c), insights: None, posts: &[], feed: &feed, voice: "", look: None, language: "English".into(), language_from_posts: true };
+        let text = describe(&ctx);
+        assert!(text.contains("[1] photo, 900 reactions\n(no caption)"), "{text}");
+        assert!(text.contains("photo, 700 reactions\nкогда пятница"));
+        assert!(text.contains("Formats of the last 6 posts: photo 50%, album 17%, text 17%, video 17%."));
+        assert!(text.contains("Of the picture posts, 60% have no caption; captions are typically about 13 characters."));
+    }
+
+    #[test]
+    fn picture_channels_get_captions_and_the_picture_to_attach() {
+        let c = channel();
+        let feed = memes();
+        let ctx = Context { channel: Some(&c), insights: None, posts: &[], feed: &feed, voice: "", look: Some("- cats in boxes, reaction memes\n- Russian text on the images"), language: "English".into(), language_from_posts: true };
+        let m = rewrite(&ctx, Rewrite::Draft, "", "", "monday", "friendly", "English");
+        assert!(m[0].content.contains("Most of this channel's posts are pictures"));
+        assert!(m[0].content.contains("What the channel's pictures show (from looking at recent ones):\n- cats in boxes"));
+        assert!(m[1].content.contains("last line starting with \"🖼 \""));
+        assert!(plan(&ctx, 3, "")[1].content.contains("\"picture\": \"what the picture should show\""));
+        assert!(assistant(&ctx, &[], &[])[0].content.contains("say what picture goes with it"));
+        // a text channel gets none of that
+        let words = [feed_post("1", "A long article about pasta and sauces", 5), feed_post("2", "Another long read about risotto", 4), feed_post("3", "Gnocchi by hand, step by step", 3)];
+        let ctx = Context { feed: &words, look: None, ..ctx };
+        assert!(!rewrite(&ctx, Rewrite::Draft, "", "", "x", "friendly", "English")[0].content.contains("Most of this channel's posts are pictures"));
+    }
+
+    #[test]
+    fn picture_ideas_come_out_of_drafts() {
+        assert_eq!(split_picture("Пятница, котики!\n🖼 кот в коробке с пивом"), ("Пятница, котики!".to_string(), "кот в коробке с пивом".to_string()));
+        assert_eq!(split_picture("Котики\n🖼\u{FE0F} кот"), ("Котики".to_string(), "кот".to_string()));
+        assert_eq!(split_title("Пятница, котики!\n🖼: кот в коробке"), ("🖼 кот в коробке".to_string(), "Пятница, котики!".to_string()));
+        assert_eq!(split_picture("Just text"), ("Just text".to_string(), String::new()));
+    }
+
+    #[test]
+    fn the_pictures_the_model_looks_at() {
+        let mut feed = memes();
+        feed.push(FeedPost { forwarded_from: Some("Other".into()), ..picture("f1", "", 5000, "PHOTO") });
+        let ids: Vec<&str> = pictures_of(&feed).iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, ["m1", "m2", "m3", "m4"]);
+        let prompt = look_prompt(&channel(), &pictures_of(&feed));
+        assert!(prompt.contains("4 recent pictures from the Telegram channel \"Design Notes\" (@designnotes). It describes itself as: UI tips"));
+        assert!(prompt.contains("1) (no caption)\n2) \"когда пятница\""));
     }
 
     #[test]

@@ -67,6 +67,11 @@ fn ai(app: &App) -> Element<'_, Message> {
         let models: Vec<Choice> = s.models.iter().map(|m| Choice::new(m.clone(), m.clone())).collect();
         model_row.insert(1, picker(models, &s.model, Message::Model));
     }
+    let mut vision_row = vec![container(input(&app.t("ai.set_vision_none"), &s.vision_model, Message::VisionModel)).width(Length::Fill).into()];
+    if !s.models.is_empty() {
+        let models: Vec<Choice> = s.models.iter().map(|m| Choice::new(m.clone(), m.clone())).collect();
+        vision_row.push(picker(models, &s.vision_model, Message::VisionModel));
+    }
     let key_input = input(if preset.needs_key { "sk-…" } else { "(not needed)" }, &s.api_key, Message::ApiKey).secure(!s.show_key);
     let mut key_row = vec![container(key_input).width(Length::Fill).into(), icon_btn(Icon::Eye, app.t(if s.show_key { "set.hide_key" } else { "set.show_key" }), Some(Message::ShowKey(!s.show_key)))];
     if !preset.key_url.is_empty() {
@@ -78,6 +83,7 @@ fn ai(app: &App) -> Element<'_, Message> {
         field(app.t("set.base_url"), input("https://…/v1", &s.base_url, Message::BaseUrl), None),
         field(app.t("set.api_key"), dir_row(rtl, key_row).spacing(8).align_y(Alignment::Center), Some(app.t("set.key_hint"))),
         field(app.t("set.model"), dir_row(rtl, model_row).spacing(8).align_y(Alignment::Center), None),
+        field(app.t("ai.set_vision"), dir_row(rtl, vision_row).spacing(8).align_y(Alignment::Center), Some(app.t("ai.set_vision_hint"))),
         dir_row(rtl, vec![btn(Some(if s.testing { Icon::Loader } else { Icon::Zap }), app.t("set.test"), theme::secondary, (!s.testing).then_some(Message::TestAi)).into(), btn(Some(Icon::Check), app.t("set.save"), theme::primary, Some(Message::SaveAi)).into()]).spacing(10),
     ]
     .spacing(16);
