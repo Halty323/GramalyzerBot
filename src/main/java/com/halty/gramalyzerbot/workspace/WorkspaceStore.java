@@ -47,6 +47,9 @@ public class WorkspaceStore {
         jdbc.update("DELETE FROM workspace_posts WHERE id=?", "telegram:"+c.telegramChatId()+":"+messageId);
         jdbc.update("UPDATE workspace_posts SET status='published',delivery_state='sent',telegram_message_id=?,delivery_error=NULL WHERE id=? AND delivery_state='sending'", messageId, id);
     }
+    public List<Post> byTelegramMessage(String channelId, long messageId) {return jdbc.query("SELECT * FROM workspace_posts WHERE channel_id=? AND telegram_message_id=?", this::mapPost, channelId, messageId);}
+    /** New title or text for a post, leaving its status and delivery as they are. */
+    public void replace(Post post) {jdbc.update("UPDATE workspace_posts SET data=? WHERE id=?", json(post), post.id());}
     public boolean hasReceipt(String channelId,long messageId) {return !jdbc.queryForList("SELECT id FROM workspace_posts WHERE channel_id=? AND telegram_message_id=?",String.class,channelId,messageId).isEmpty();}
     public void deliveryFailed(String id, boolean uncertain, String error) {jdbc.update("UPDATE workspace_posts SET delivery_state=?,delivery_error=? WHERE id=? AND delivery_state='sending'", uncertain ? "uncertain" : "failed", error, id);}
     public void recoverInterrupted() {jdbc.update("UPDATE workspace_posts SET delivery_state='uncertain',delivery_error='Delivery was interrupted. Check Telegram before creating a replacement.' WHERE delivery_state='sending'");}

@@ -53,11 +53,34 @@ public class WorkspaceService {
     public void recordSubscribers(long chatId, long count) {store.telegramChannel(chatId).ifPresent(c -> store.recordSubscribers(c.id(), count));}
     /** Latest reaction total of one channel message. */
     public void recordReactions(long chatId, long messageId, long reactions) {store.telegramChannel(chatId).ifPresent(c -> store.recordReactions(c.id(), messageId, reactions));}
-    public void channelPost(long chatId, int messageId, String text, long timestamp) {
+    public void channelPost(long chatId, int messageId, String text, long timestamp) {channelPost(chatId, messageId, text, timestamp, null, false);}
+    /**
+     * A post that appeared in (or was edited in) a channel the CRM knows. An album arrives as one message per picture, and
+     * only one of them carries the caption: it is kept as one post, under the album's id, with whichever caption it has.
+     * An edit changes the text of the post it belongs to; one the CRM never saw is left alone.
+     */
+    public void channelPost(long chatId, int messageId, String text, long timestamp, String album, boolean edited) {
         Channel c = store.telegramChannel(chatId).orElse(null); if (c == null) return;
-        String id = "telegram:"+chatId+":"+messageId; if (store.post(id).isPresent() || store.hasReceipt(c.id(),messageId)) return;
-        String body = text == null ? "Media post" : text;
-        try {store.insert(new Post(id, c.id(), body.substring(0, Math.min(100, body.length())), body, "published", Instant.ofEpochSecond(timestamp), 0, 0, 0, "Telegram", "sent", (long) messageId, null));}
+        String caption = text == null || text.isBlank() ? null : text;
+        String id = album == null ? "telegram:"+chatId+":"+messageId : "telegram:"+chatId+":album:"+album;
+        Optional<Post> known = store.post(id);
+        if (known.isEmpty() && album == null) known = store.byTelegramMessage(c.id(), messageId).stream().findFirst();
+        if (known.isPresent()) {
+            Post p = known.get();
+            boolean ours = p.id().startsWith("telegram:");
+            // an album item without a caption says nothing new; an edit, or the caption arriving with a later item, does
+            if (caption == null ? !edited || album != null : !edited && !MEDIA.equals(p.body())) return;
+            String body = caption == null ? MEDIA : caption;
+            if (body.equals(p.body())) return;
+            store.replace(new Post(p.id(), p.channelId(), ours ? title(body) : p.title(), body, p.status(), p.scheduledAt(), p.views(), p.reactions(), p.shares(), p.category(), p.deliveryState(), p.telegramMessageId(), p.deliveryError()));
+            return;
+        }
+        if (edited || store.hasReceipt(c.id(),messageId)) return;
+        String body = caption == null ? MEDIA : caption;
+        try {store.insert(new Post(id, c.id(), title(body), body, "published", Instant.ofEpochSecond(timestamp), 0, 0, 0, "Telegram", "sent", (long) messageId, null));}
         catch(org.springframework.dao.DuplicateKeyException ignored) {/* A delivery receipt or repeated update already recorded the post. */}
     }
+    /** What a post without text (a picture, a video) is called in the post list. */
+    private static final String MEDIA = "Media post";
+    private static String title(String body) {return body.substring(0, Math.min(100, body.length()));}
 }

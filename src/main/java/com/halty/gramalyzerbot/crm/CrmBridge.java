@@ -25,7 +25,8 @@ import java.util.Optional;
  * <ul>
  *   <li>Both sides describe the same Telegram channel. They are matched by Telegram chat id and then linked
  *       through {@code channels.workspace_channel_id}.</li>
- *   <li>The CRM learns about channels and their posts from the same Telegram updates as the bot; see {@link #observe}.</li>
+ *   <li>The CRM learns about channels and their posts (and edits to them) from the same Telegram updates as the bot;
+ *       see {@link #observe}.</li>
  *   <li>Timezone is the one setting both sides expose; changing it on either side changes it on the other.</li>
  *   <li>Posts that the CRM queue publishes are handed to the analysis.</li>
  * </ul>
@@ -64,10 +65,11 @@ public class CrmBridge {
             long total = 0;
             if (rc.getReactions() != null) for (var r : rc.getReactions()) total += r.getTotalCount() == null ? 0 : r.getTotalCount();
             workspace.recordReactions(rc.getChat().getId(), rc.getMessageId(), total);
-        } else if (update.hasChannelPost()) {
-            var post = update.getChannelPost();
+        } else if (update.hasChannelPost() || update.hasEditedChannelPost()) {
+            boolean edited = !update.hasChannelPost();
+            var post = edited ? update.getEditedChannelPost() : update.getChannelPost();
             workspace.channelPost(post.getChatId(), post.getMessageId(),
-                    post.getText() != null ? post.getText() : post.getCaption(), post.getDate());
+                    post.getText() != null ? post.getText() : post.getCaption(), post.getDate(), post.getMediaGroupId(), edited);
         }
     }
 

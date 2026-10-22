@@ -32,9 +32,14 @@ public final class PreviewParser {
 
     private PreviewParser() {}
 
-    /** What the public pages say about a channel. Counts are as shown by Telegram, e.g. "12.3K" becomes 12300. */
+    /**
+     * What the public pages say about a channel. Counts are as shown by Telegram, e.g. "12.3K" becomes 12300.
+     *
+     * @param seen the message ids of every post on the page, even one that couldn't be read: a stored post in their
+     *             range that isn't among them was deleted
+     */
     public record Preview(String username, String title, String description, String photoUrl, Integer subscribers,
-                          boolean verified, Map<String, Integer> counters, List<PreviewPost> posts) {}
+                          boolean verified, Map<String, Integer> counters, List<PreviewPost> posts, List<Integer> seen) {}
 
     public record PreviewPost(int messageId, Instant postedAt, String kind, String text, Integer views, int reactions,
                               String reactionBreakdown, String mediaUrl, boolean hasLink, String forwardedFrom, boolean edited) {}
@@ -65,9 +70,13 @@ public final class PreviewParser {
         Integer subscribers = counters.getOrDefault("subscriber", counters.get("member"));
 
         List<PreviewPost> posts = new ArrayList<>();
-        for (Element m : doc.select(".tgme_widget_message[data-post]")) post(m).ifPresent(posts::add);
+        List<Integer> seen = new ArrayList<>();
+        for (Element m : doc.select(".tgme_widget_message[data-post]")) {
+            id(m).ifPresent(seen::add);
+            post(m).ifPresent(posts::add);
+        }
         return Optional.of(new Preview(username, title, description.isBlank() ? null : description, photo, subscribers,
-                verified, counters, posts));
+                verified, counters, posts, seen));
     }
 
     /** Classifies the plain {@code t.me/<username>} page, for usernames without a channel preview. */
@@ -92,21 +101,27 @@ public final class PreviewParser {
         String digits = text(doc.selectFirst(".tgme_page_extra")).replaceAll("[^0-9]", "");
         Integer subscribers = digits.isEmpty() || digits.length() > 9 ? null : Integer.parseInt(digits);
         return Optional.of(new Preview(username, title.isBlank() ? username : title, description.isBlank() ? null : description,
-                photo, subscribers, verified, Map.of(), List.of()));
+                photo, subscribers, verified, Map.of(), List.of(), List.of()));
     }
 
     // ------------------------------------------------------------------ posts
 
-    private static Optional<PreviewPost> post(Element m) {
+    /** The message id in {@code data-post="channel/123"}. */
+    private static Optional<Integer> id(Element m) {
         String ref = m.attr("data-post");
         int slash = ref.lastIndexOf('/');
         if (slash < 0) return Optional.empty();
-        int id;
         try {
-            id = Integer.parseInt(ref.substring(slash + 1));
+            return Optional.of(Integer.parseInt(ref.substring(slash + 1)));
         } catch (NumberFormatException e) {
             return Optional.empty();
         }
+    }
+
+    private static Optional<PreviewPost> post(Element m) {
+        Optional<Integer> ref = id(m);
+        if (ref.isEmpty()) return Optional.empty();
+        int id = ref.get();
         Element time = m.selectFirst(".tgme_widget_message_date time[datetime]");
         if (time == null) return Optional.empty();
         Instant at;

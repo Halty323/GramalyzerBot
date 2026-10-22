@@ -252,8 +252,9 @@ pub struct App {
     pub workspace: Option<Workspace>,
     pub tracked: Option<Vec<TrackedSummary>>,
     pub insights: HashMap<String, Result<Insights, ApiError>>,
-    /// Each own channel's recent Telegram posts, so AI writes like the channel.
+    /// Each own channel's recent Telegram posts, so AI writes like the channel, and when each was last asked for.
     pub feeds: HashMap<String, ChannelFeed>,
+    feeds_at: HashMap<String, Instant>,
     /// What each channel's pictures show, from the model for pictures, and the channels it is looking at now.
     pub looks: HashMap<String, SavedLook>,
     pub looking: HashSet<String>,
@@ -475,6 +476,7 @@ impl App {
             tracked: None,
             insights: HashMap::new(),
             feeds: HashMap::new(),
+            feeds_at: HashMap::new(),
             looks: config::load_looks(),
             looking: HashSet::new(),
             knows_open: false,
@@ -601,12 +603,20 @@ impl App {
     /// channel, so it also loads whatever `page_data` would.
     fn load_grounding(&mut self) -> Task<Message> {
         let ids: Vec<String> = self.channels().iter().map(|c| c.id.clone()).collect();
+        let mut tasks: Vec<Task<Message>> = ids.iter().map(|id| self.load_insights(id, false)).collect();
+        tasks.push(self.refresh_feeds());
+        Task::batch(tasks)
+    }
+
+    /// Asks again for every channel's posts last asked for over three minutes ago, so new posts reach the AI while
+    /// Studio stays open. The server reads Telegram at most every two minutes per channel and keeps what it read.
+    fn refresh_feeds(&mut self) -> Task<Message> {
+        const FRESH: Duration = Duration::from_secs(180);
+        let ids: Vec<String> = self.channels().iter().map(|c| c.id.clone()).filter(|id| self.feeds_at.get(id).is_none_or(|at| at.elapsed() > FRESH)).collect();
         let mut tasks = Vec::new();
         for id in ids {
-            tasks.push(self.load_insights(&id, false));
-            if !self.feeds.contains_key(&id) {
-                tasks.push(Task::perform(self.client.clone().feed(id.clone()), move |r| Message::FeedLoaded(id.clone(), r)));
-            }
+            self.feeds_at.insert(id.clone(), Instant::now());
+            tasks.push(Task::perform(self.client.clone().feed(id.clone()), move |r| Message::FeedLoaded(id.clone(), r)));
         }
         Task::batch(tasks)
     }
@@ -791,6 +801,8 @@ impl App {
                         let c = c.clone();
                         self.fill_channel_form(&c);
                     }
+                } else {
+                    tasks.push(self.refresh_feeds());
                 }
                 return Task::batch(tasks);
             }
@@ -876,6 +888,7 @@ impl App {
             Message::Reload => {
                 self.insights.clear();
                 self.feeds.clear();
+                self.feeds_at.clear();
                 let data = self.load_grounding();
                 return Task::batch([self.reload(), Task::perform(self.client.clone().tracked(), Message::Tracked)]).chain(data);
             }
