@@ -1,6 +1,6 @@
 # GramalyzerBot
 
-The shared Java 21 / Spring Boot backend behind the Gramalyzer admin website ([GramalyzerVibe](https://github.com/Halty323/GramalyzerVibe)) and the Telegram bot. It has two modules that share one database and one Telegram bot:
+The shared Java 25 / Spring Boot backend behind the Gramalyzer admin website ([GramalyzerVibe](https://github.com/Halty323/GramalyzerVibe)) and the Telegram bot. It has two modules that share one database and one Telegram bot:
 
 | Module | Package | What it does |
 |---|---|---|
