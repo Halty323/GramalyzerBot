@@ -48,6 +48,10 @@ public class TrackedPost {
     @Column(name = "media_url", length = 1024)
     private String mediaUrl;
 
+    /** Every photo and video of the post as JSON, see {@link FeedPost#media(String)}. */
+    @Column(length = FeedPost.MEDIA_MAX)
+    private String media;
+
     @Column(name = "has_link", nullable = false)
     private boolean hasLink;
 

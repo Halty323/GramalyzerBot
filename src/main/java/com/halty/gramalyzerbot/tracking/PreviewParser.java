@@ -29,6 +29,10 @@ public final class PreviewParser {
 
     private static final Pattern BACKGROUND = Pattern.compile("background-image:\\s*url\\(['\"]?([^'\")]+)['\"]?\\)");
     private static final Pattern NUMBER = Pattern.compile("([0-9]+(?:[.,][0-9]+)?)\\s*([KkMm]?)");
+    /** Where Telegram puts an album item, e.g. "left:303px;top:0px;width:150px;height:149px". */
+    private static final Pattern PX = Pattern.compile("(?<![\\w-])(left|top|width|height)\\s*:\\s*([0-9]+(?:\\.[0-9]+)?)px");
+    /** A picture's shape, e.g. "padding-top:75%" for 4:3. */
+    private static final Pattern PADDING = Pattern.compile("padding-top\\s*:\\s*([0-9]+(?:\\.[0-9]+)?)%");
 
     private PreviewParser() {}
 
@@ -42,7 +46,8 @@ public final class PreviewParser {
                           boolean verified, Map<String, Integer> counters, List<PreviewPost> posts, List<Integer> seen) {}
 
     public record PreviewPost(int messageId, Instant postedAt, String kind, String text, Integer views, int reactions,
-                              String reactionBreakdown, String mediaUrl, boolean hasLink, String forwardedFrom, boolean edited) {}
+                              String reactionBreakdown, String mediaUrl, boolean hasLink, String forwardedFrom, boolean edited,
+                              List<FeedPost.Media> media) {}
 
     /** What a username turned out to be when there is no channel preview. */
     public enum PageKind { CHANNEL, GROUP, OTHER, MISSING }
@@ -168,7 +173,7 @@ public final class PreviewParser {
         String forwarded = text(m.selectFirst(".tgme_widget_message_forwarded_from_name"));
 
         return Optional.of(new PreviewPost(id, at, kind(m), text, views, total, breakdown.isEmpty() ? null : breakdown.toString(),
-                media(m), link, forwarded.isBlank() ? null : forwarded, edited));
+                media(m), link, forwarded.isBlank() ? null : forwarded, edited, items(m)));
     }
 
     /** Same names as {@link com.halty.gramalyzerbot.analytics.PostKind}. */
@@ -199,6 +204,72 @@ public final class PreviewParser {
         }
         Element sticker = m.selectFirst(".tgme_widget_message_sticker[data-webp]");
         return sticker == null ? null : absolute(sticker.attr("data-webp"));
+    }
+
+    /**
+     * The photos and videos of a post. An album's items come with the places Telegram gives them in its mosaic, in
+     * pixels on the page and here relative to the album's width; a single photo or video comes with its shape.
+     */
+    static List<FeedPost.Media> items(Element m) {
+        Element group = m.selectFirst(".tgme_widget_message_grouped_wrap");
+        if (group != null) {
+            Elements wraps = group.select(".grouped_media_wrap");
+            if (wraps.isEmpty()) wraps = group.select(".tgme_widget_message_photo_wrap, .tgme_widget_message_video_player");
+            Map<String, Double> layer = px(group.selectFirst(".tgme_widget_message_grouped_layer"));
+            double width = layer.getOrDefault("width", px(group).getOrDefault("width", 0.0));
+            List<FeedPost.Media> out = new ArrayList<>();
+            boolean placed = width > 0;
+            for (Element w : wraps) {
+                String url = picture(w);
+                if (url == null) continue;
+                Map<String, Double> at = px(w);
+                placed &= at.size() == 4;
+                out.add(new FeedPost.Media(url, video(w), rel(at.get("left"), width), rel(at.get("top"), width),
+                        rel(at.get("width"), width), rel(at.get("height"), width)));
+            }
+            // a layout is only worth something if it covers every item
+            if (!placed) out = out.stream().map(i -> new FeedPost.Media(i.url(), i.video(), null, null, null, null)).toList();
+            return out;
+        }
+        Element single = m.selectFirst(".tgme_widget_message_photo_wrap, .tgme_widget_message_video_player");
+        if (single == null || single.closest(".tgme_widget_message_link_preview") != null) return List.of();
+        String url = picture(single);
+        if (url == null) return List.of();
+        Double h = null;
+        for (Element e : single.select("[style*=padding-top]")) {
+            Matcher shape = PADDING.matcher(e.attr("style"));
+            if (shape.find()) {
+                h = rel(Double.parseDouble(shape.group(1)), 100);
+                break;
+            }
+        }
+        return List.of(h == null ? new FeedPost.Media(url, video(single), null, null, null, null)
+                : new FeedPost.Media(url, video(single), 0.0, 0.0, 1.0, h));
+    }
+
+    /** The picture of an album item or single photo: its own background, or a video's thumbnail inside it. */
+    private static String picture(Element e) {
+        for (Element candidate : e.select("[style*=background-image]")) {
+            Matcher bg = BACKGROUND.matcher(candidate.attr("style"));
+            if (bg.find()) return absolute(bg.group(1));
+        }
+        return null;
+    }
+
+    private static boolean video(Element e) {
+        return e.hasClass("tgme_widget_message_video_player") || e.selectFirst(".tgme_widget_message_video_thumb, video") != null;
+    }
+
+    private static Map<String, Double> px(Element e) {
+        Map<String, Double> out = new LinkedHashMap<>();
+        if (e == null) return out;
+        Matcher px = PX.matcher(e.attr("style"));
+        while (px.find()) out.putIfAbsent(px.group(1), Double.parseDouble(px.group(2)));
+        return out;
+    }
+
+    private static Double rel(Double value, double of) {
+        return value == null || of <= 0 ? null : Math.round(value / of * 10000) / 10000.0;
     }
 
     private static String emojiOf(Element r) {
