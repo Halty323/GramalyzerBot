@@ -1,6 +1,6 @@
 //! Assistant: a chat with the AI that knows the channel, its analytics, the queue and the watchlist.
 use crate::app::{AiSlot, App, Message};
-use crate::pages::ai_unready_card;
+use crate::pages::{ai_unready_card, knows};
 use crate::theme;
 use crate::ui::*;
 use crate::view::channel_avatar;
@@ -62,6 +62,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let mut col = column![header].spacing(12).height(Length::Fill);
     if !app.ai_ready() {
         col = col.push(ai_unready_card(app));
+    } else if let Some(c) = channel {
+        col = col.push(knows(app, c));
     }
     card(col.push(wall).push(composer)).height(Length::Fill).width(Length::Fill).into()
 }

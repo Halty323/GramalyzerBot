@@ -252,6 +252,9 @@ pub struct FeedPost {
     #[serde(default)]
     pub reaction_list: Vec<Reaction>,
     pub comments: Option<i64>,
+    /// The post's picture (a photo, a video's thumbnail); only posts read from the public t.me page have one.
+    #[serde(default)]
+    pub media_url: Option<String>,
     pub url: Option<String>,
     pub forwarded_from: Option<String>,
     #[serde(default)]

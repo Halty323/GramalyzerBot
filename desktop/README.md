@@ -64,22 +64,24 @@ Studio works with any **OpenAI-compatible** API (`POST /chat/completions` with s
 
 These free tiers work with Studio. They were checked in October 2026 and change often.
 
-| Provider | Free tier | Default model | Get a key |
-|---|---|---|---|
-| **Groq** (default) | No card. 30 requests/min, 1,000/day, 8K tokens/min, 200K tokens/day. Very fast. | `openai/gpt-oss-120b` | [console.groq.com/keys](https://console.groq.com/keys) |
-| **Google Gemini** | Free key with a Google account. Each model has its own daily quota. Outside the EU/UK, free prompts may be used to improve Google's models. | `gemini-flash-latest` | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
-| **OpenRouter** | Models ending in `:free` cost nothing. 20 requests/min and 50/day, or 1,000/day after a one-time $10 top-up. | `meta-llama/llama-3.3-70b-instruct:free` | [openrouter.ai/keys](https://openrouter.ai/keys) |
-| **Cerebras** | Free trial, no card. 5 requests/min, 1M tokens/day. | `gpt-oss-120b` | [cloud.cerebras.ai](https://cloud.cerebras.ai/) |
-| **Mistral** | Free "Experiment" plan with phone verification. Prompts may be used for training. | `mistral-small-latest` | [console.mistral.ai](https://console.mistral.ai/api-keys) |
-| **GitHub Models** | Free with a GitHub account, using a token with `models:read`. About 15 requests/min and 150/day on most models. | `openai/gpt-4.1-mini` | [github.com/settings/personal-access-tokens](https://github.com/settings/personal-access-tokens) |
-| **Ollama** | Runs models on your own machine: free, private, no limits. Needs a decent CPU or GPU. | `llama3.2` | [ollama.com/download](https://ollama.com/download) |
-| **Custom** | Any other compatible endpoint, such as OpenAI, DeepSeek, Together or LM Studio. | — | — |
+| Provider | Free tier | Default model | Model for pictures | Get a key |
+|---|---|---|---|---|
+| **Groq** (default) | No card. 30 requests/min, 1,000/day, 8K tokens/min, 200K tokens/day. Very fast. | `openai/gpt-oss-120b` | `meta-llama/llama-4-scout-17b-16e-instruct` | [console.groq.com/keys](https://console.groq.com/keys) |
+| **Google Gemini** | Free key with a Google account. Each model has its own daily quota. Outside the EU/UK, free prompts may be used to improve Google's models. | `gemini-flash-latest` | `gemini-flash-latest` | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| **OpenRouter** | Models ending in `:free` cost nothing. 20 requests/min and 50/day, or 1,000/day after a one-time $10 top-up. | `meta-llama/llama-3.3-70b-instruct:free` | `google/gemma-3-27b-it:free` | [openrouter.ai/keys](https://openrouter.ai/keys) |
+| **Cerebras** | Free trial, no card. 5 requests/min, 1M tokens/day. | `gpt-oss-120b` | — | [cloud.cerebras.ai](https://cloud.cerebras.ai/) |
+| **Mistral** | Free "Experiment" plan with phone verification. Prompts may be used for training. | `mistral-small-latest` | `mistral-small-latest` | [console.mistral.ai](https://console.mistral.ai/api-keys) |
+| **GitHub Models** | Free with a GitHub account, using a token with `models:read`. About 15 requests/min and 150/day on most models. | `openai/gpt-4.1-mini` | `openai/gpt-4.1-mini` | [github.com/settings/personal-access-tokens](https://github.com/settings/personal-access-tokens) |
+| **Ollama** | Runs models on your own machine: free, private, no limits. Needs a decent CPU or GPU. | `llama3.2` | — (set one you pulled, such as `gemma3`) | [ollama.com/download](https://ollama.com/download) |
+| **Custom** | Any other compatible endpoint, such as OpenAI, DeepSeek, Together or LM Studio. | — | — | — |
 
 Sources: the providers' own rate-limit pages ([Groq](https://console.groq.com/docs/rate-limits), [Gemini](https://ai.google.dev/gemini-api/docs/rate-limits), [OpenRouter](https://openrouter.ai/docs/api-reference/limits), [Cerebras](https://inference-docs.cerebras.ai/support/rate-limits), [GitHub Models](https://docs.github.com/en/github-models/use-github-models/prototyping-with-ai-models#rate-limits)).
 
 Free tiers can log prompts, so don't send anything confidential. When one provider hits its limit, switch to another in Settings.
 
-Every request carries the channel's context, so posts stay on the channel's subject and sound like it. The model sees the channel's name and description, six of its own recent posts in full (its most engaging first, then the newest), its house style in numbers (typical length, emoji, links, the hashtags it uses), what is already drafted or scheduled, its analytics (best hours, which formats, lengths and hashtags work) and your brand voice. Drafts are written in the language of the channel's posts unless you pick one under **Settings → Writing**. Prompts tell the model that Telegram posts are plain text (no Markdown) with a 4096-character limit. The prompts are in `src/prompts.rs`.
+Every request carries the channel's context, so posts stay on the channel's subject and sound like it. The model sees the channel's name and description, up to ten of its own recent posts (its most engaging first, then the newest; picture posts too, with their format and caption), the mix of formats it posts and how long its captions are, its house style in numbers (typical length, emoji, links, the hashtags it uses), what is already drafted or scheduled, its analytics (best hours, which formats, lengths and hashtags work) and your brand voice.
+
+Channels of pictures get more. The **model for pictures** (set under **Settings → AI provider**, prefilled per provider; leave it empty to skip) looks at four of the channel's pictures and describes what they show, and that description goes into every request. It is remembered for three days in `looks.json` next to the config file. When most posts are pictures, drafts come back as a short caption plus a line starting with 🖼 that names the picture to attach (it becomes the post's title), and the planner suggests a picture for each post. Pictures come only from a channel's public t.me page: posts the bot collected keep their captions but not their pictures. The AI panels show what the AI has read and seen, and why when it couldn't. Drafts are written in the language of the channel's posts unless you pick one under **Settings → Writing**. Prompts tell the model that Telegram posts are plain text (no Markdown) with a 4096-character limit. The prompts are in `src/prompts.rs`.
 
 ## Why iced
 
@@ -93,7 +95,7 @@ src/app.rs         state, messages and update: everything the app does
 src/view.rs        shell: sidebar, top bar, login, toasts
 src/pages/         one module per page
 src/api.rs         backend client (/api, Bearer token)
-src/ai.rs          OpenAI-compatible client: streaming SSE, model list, provider presets
+src/ai.rs          OpenAI-compatible client: streaming SSE, model list, provider presets, picture descriptions
 src/prompts.rs     prompt builders with the channel's analytics as context
 src/charts.rs      canvas charts: audience line, weekly heatmap, sparklines
 src/theme.rs       light/dark design tokens and widget styles

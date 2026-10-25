@@ -2,7 +2,7 @@
 use crate::app::{AiSlot, App, ApplyMode, Message, Rewrite, TONES, local, parse_when};
 use crate::i18n::LANGS;
 use crate::model::{Post, PostStatus};
-use crate::pages::{ai_output, post_row, section, status_badge};
+use crate::pages::{ai_output, knows, post_row, section, status_badge};
 use crate::theme;
 use crate::ui::*;
 use crate::view::{Choice, channel_avatar, picker};
@@ -193,6 +193,9 @@ fn copilot(app: &App) -> Element<'_, Message> {
     if !app.ai_ready() {
         col = col.push(small(app.t("ai.unready_text"))).push(btn(Some(Icon::Key), app.t("ai.connect"), theme::primary, Some(Message::SettingsTab(crate::app::SettingsTab::Ai))).width(Length::Fill));
         return card(column![col, gap(6.0), preview(app)].spacing(14)).width(340).height(Length::Fill).into();
+    }
+    if let Some(c) = app.channel_by_id(&s.channel_id) {
+        col = col.push(knows(app, c));
     }
     let brief = text_input(&app.t("ai.brief_placeholder"), &s.brief).on_input(Message::Brief).on_submit(Message::RunRewrite(Rewrite::Draft)).padding(9).style(theme::input).font(INTER).size(13.5);
     col = col.push(field(app.t("ai.brief"), brief, None)).push(btn(Some(Icon::Wand), app.t("ai.draft"), theme::primary, (!running && s.open).then_some(Message::RunRewrite(Rewrite::Draft))).width(Length::Fill));

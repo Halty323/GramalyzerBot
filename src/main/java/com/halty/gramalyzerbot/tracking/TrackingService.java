@@ -18,6 +18,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.*;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -43,6 +44,13 @@ public class TrackingService {
     private static final Pattern RESOLVE = Pattern.compile("^tg://resolve\\?domain=([A-Za-z0-9_]+).*$", Pattern.CASE_INSENSITIVE);
     /** A preview this recent is served as is. */
     private static final Duration FRESH = Duration.ofMinutes(10);
+    /** The same for the workspace's own channels: their owner wants to see the post they just published. */
+    private static final Duration OWN_FRESH = Duration.ofMinutes(2);
+    /** A channel seen for the first time is read back this far (about 20 posts a page), so its stats start from real history. */
+    private static final int BACKFILL_POSTS = 60;
+    private static final int BACKFILL_PAGES = 3;
+    /** More posts than one page holds since the last refresh: older pages are read until they meet the stored ones. */
+    private static final int GAP_PAGES = 10;
 
     private final TrackedChannelRepository channels;
     private final TrackedPostRepository posts;
@@ -142,6 +150,29 @@ public class TrackingService {
         return fetch(username, null);
     }
 
+    /**
+     * One of the workspace's own public channels. It is kept for good, so its posts build up in the database instead of
+     * being forgotten after a few days like a channel somebody only looked at, and the scheduled refresh visits it. It
+     * is fetched again when the last fetch is more than two minutes old.
+     */
+    public TrackedChannel own(String workspaceChannelId, String input) {
+        String username = username(input);
+        Optional<TrackedChannel> known = channels.findByUsername(username);
+        TrackedChannel c = known.isPresent() ? refresh(known.get(), false, OWN_FRESH) : fetch(username, null);
+        String owner = "own:" + workspaceChannelId;
+        // the channel was renamed: its old username is somebody else's now
+        for (TrackedWatcher w : watchers.findAllByOwnerOrderByCreatedAtAsc(owner))
+            if (!w.getTrackedChannelId().equals(c.getId())) watchers.delete(w);
+        if (!watching(owner, c)) {
+            try {
+                watchers.save(new TrackedWatcher(c.getId(), owner));
+            } catch (org.springframework.dao.DataIntegrityViolationException alreadyThere) {
+                // two feed requests at once
+            }
+        }
+        return c;
+    }
+
     /** A channel somebody already looked at; never fetches. */
     public Optional<TrackedChannel> find(String input) { return channels.findByUsername(username(input)); }
 
@@ -153,8 +184,12 @@ public class TrackingService {
      * already know keeps the old data and records the reason in {@code lastError}.
      */
     public TrackedChannel refresh(TrackedChannel c, boolean force) {
+        return refresh(c, force, FRESH);
+    }
+
+    private TrackedChannel refresh(TrackedChannel c, boolean force, Duration fresh) {
         if (c.isDemo()) return c;
-        if (!force && c.getFetchedAt() != null && c.getFetchedAt().isAfter(Instant.now().minus(FRESH)) && c.getLastError() == null) return c;
+        if (!force && c.getFetchedAt() != null && c.getFetchedAt().isAfter(Instant.now().minus(fresh)) && c.getLastError() == null) return c;
         try {
             return fetch(c.getUsername(), c);
         } catch (TrackingException e) {
@@ -199,8 +234,10 @@ public class TrackingService {
     private TrackedChannel fetch(String username, TrackedChannel existing) {
         Preview preview = null;
         TrackingException failure = null;
+        Integer newest = existing == null ? null
+                : posts.findFirstByTrackedChannelIdOrderByMessageIdDesc(existing.getId()).map(TrackedPost::getMessageId).orElse(null);
         try {
-            preview = readPreview(username, existing == null);
+            preview = readPreview(username, newest);
         } catch (TrackingException e) {
             failure = e;
         }
@@ -239,13 +276,17 @@ public class TrackingService {
             // somebody else fetched the same new channel a moment ago
             saved = channels.findByUsername(username).orElseThrow(() -> raced);
         }
-        if (preview != null) store(saved, preview.posts());
+        if (preview != null) store(saved, preview);
         snapshot(saved);
         return saved;
     }
 
-    /** The preview page, plus one older page the first time so the stats start from ~40 posts instead of ~20. */
-    private Preview readPreview(String username, boolean firstTime) {
+    /**
+     * The preview page. The first time ({@code newest} is null: nothing stored yet), older pages too, so the stats start
+     * from ~60 posts instead of ~20. Later, when more posts came out than the page holds, older pages until they reach
+     * the newest stored post, so none goes missing in between.
+     */
+    private Preview readPreview(String username, Integer newest) {
         try {
             PreviewClient.Page page = client.preview(username, null);
             if (page.status() == 404) throw new TrackingException(Code.NOT_FOUND);
@@ -261,18 +302,11 @@ public class TrackingService {
                 };
             }
             Preview p = preview.get();
-            if (firstTime && p.posts().size() >= 10) {
-                int oldest = p.posts().stream().mapToInt(PreviewPost::messageId).min().orElse(0);
-                try {
-                    Optional<Preview> older = PreviewParser.preview(client.preview(username, oldest).html(), username);
-                    if (older.isPresent()) {
-                        List<PreviewPost> all = new ArrayList<>(older.get().posts());
-                        all.addAll(p.posts());
-                        p = new Preview(p.username(), p.title(), p.description(), p.photoUrl(), p.subscribers(), p.verified(), p.counters(), all);
-                    }
-                } catch (IOException e) {
-                    log.debug("Older posts of @{} unavailable: {}", username, e.getMessage());
-                }
+            if (newest == null) {
+                // a page of fewer than 10 posts is the whole channel
+                if (p.seen().size() >= 10) p = withOlder(username, p, BACKFILL_PAGES - 1, seen -> seen.size() >= BACKFILL_POSTS);
+            } else {
+                p = withOlder(username, p, GAP_PAGES, seen -> Collections.min(seen) <= newest);
             }
             return p;
         } catch (IOException e) {
@@ -281,11 +315,45 @@ public class TrackingService {
         }
     }
 
-    private void store(TrackedChannel c, List<PreviewPost> fresh) {
-        if (fresh.isEmpty()) return;
+    /**
+     * Adds older pages ({@code ?before=}) to a preview, at most {@code pages} of them, until {@code enough} holds for the
+     * ids seen so far. The pages follow each other, so together they still cover one unbroken range of messages.
+     */
+    private Preview withOlder(String username, Preview p, int pages, Predicate<List<Integer>> enough) {
+        List<PreviewPost> all = new ArrayList<>(p.posts());
+        List<Integer> seen = new ArrayList<>(p.seen());
+        for (int i = 0; i < pages && !seen.isEmpty() && !enough.test(seen); i++) {
+            int oldest = Collections.min(seen);
+            Optional<Preview> older;
+            try {
+                older = PreviewParser.preview(client.preview(username, oldest).html(), username);
+            } catch (IOException e) {
+                log.debug("Older posts of @{} unavailable: {}", username, e.getMessage());
+                break;
+            }
+            // nothing older, or a page that ignored ?before=
+            if (older.isEmpty() || older.get().seen().isEmpty() || Collections.min(older.get().seen()) >= oldest) break;
+            all.addAll(0, older.get().posts().stream().filter(o -> o.messageId() < oldest).toList());
+            seen.addAll(older.get().seen().stream().filter(id -> id < oldest).toList());
+        }
+        return new Preview(p.username(), p.title(), p.description(), p.photoUrl(), p.subscribers(), p.verified(), p.counters(), all, seen);
+    }
+
+    /**
+     * Saves the posts on the preview: new ones are added, the others updated (views, reactions, an edited text). A
+     * stored post within the range the preview covers that isn't on it any more was deleted in the channel.
+     */
+    private void store(TrackedChannel c, Preview preview) {
+        if (preview.seen().isEmpty()) return;
+        List<PreviewPost> fresh = preview.posts();
         Map<Integer, PreviewPost> byId = new LinkedHashMap<>();
         for (PreviewPost p : fresh) byId.put(p.messageId(), p);
+        Set<Integer> seen = new HashSet<>(preview.seen());
+        int from = Collections.min(preview.seen()), to = Collections.max(preview.seen());
         tx.executeWithoutResult(s -> {
+            List<TrackedPost> gone = posts.findAllByTrackedChannelIdAndMessageIdBetween(c.getId(), from, to).stream()
+                    .filter(t -> !seen.contains(t.getMessageId())).toList();
+            if (!gone.isEmpty()) posts.deleteAll(gone);
             Map<Integer, TrackedPost> known = posts.findAllByTrackedChannelIdAndMessageIdIn(c.getId(), byId.keySet()).stream()
                     .collect(Collectors.toMap(TrackedPost::getMessageId, Function.identity()));
             Instant now = Instant.now();
