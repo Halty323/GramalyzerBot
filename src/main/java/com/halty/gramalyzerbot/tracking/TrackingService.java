@@ -369,6 +369,7 @@ public class TrackingService {
                 t.setReactions(p.reactions());
                 t.setReactionBreakdown(p.reactionBreakdown());
                 t.setMediaUrl(trunc(p.mediaUrl(), 1024));
+                t.setMedia(FeedPost.media(p.media()));
                 t.setHasLink(p.hasLink());
                 t.setForwardedFrom(trunc(p.forwardedFrom(), 255));
                 t.setEdited(p.edited());

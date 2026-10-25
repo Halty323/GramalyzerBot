@@ -65,7 +65,7 @@ public class FeedService {
         List<Models.Post> all = workspace.workspace().posts().stream().filter(p -> p.channelId().equals(crm.id())).toList();
         List<FeedPost> scheduled = all.stream().filter(p -> "scheduled".equals(p.status()))
                 .sorted(Comparator.comparing(Models.Post::scheduledAt))
-                .map(p -> new FeedPost(p.id(), null, p.scheduledAt(), "TEXT", p.body(), null, 0, List.of(), null, null, null, null, false, "scheduled"))
+                .map(p -> new FeedPost(p.id(), null, p.scheduledAt(), "TEXT", p.body(), null, 0, List.of(), null, null, List.of(), null, null, false, "scheduled"))
                 .toList();
 
         String handle = crm.handle() == null ? "" : crm.handle().replaceFirst("^@", "");
@@ -94,7 +94,7 @@ public class FeedService {
         List<FeedPost> feed = all.stream().filter(p -> "published".equals(p.status()))
                 .sorted(Comparator.comparing(Models.Post::scheduledAt).reversed())
                 .map(p -> new FeedPost(p.id(), p.telegramMessageId() == null ? null : p.telegramMessageId().intValue(), p.scheduledAt(), "TEXT",
-                        p.body(), demo ? (Integer) (int) p.views() : null, (int) p.reactions(), List.of(), null, null,
+                        p.body(), demo ? (Integer) (int) p.views() : null, (int) p.reactions(), List.of(), null, null, List.of(),
                         p.telegramMessageId() == null || handle.isBlank() || demo ? null : "https://t.me/" + handle + "/" + p.telegramMessageId(),
                         null, false, "published"))
                 .toList();
@@ -140,7 +140,7 @@ public class FeedService {
         // The demo's sample posts only have reactions; give them believable views so the viewer looks like the real thing.
         Integer views = ch.isDemo() ? reactions * (18 + Math.floorMod(first.getMessageId() * 7, 13)) + 40 : null;
         return new FeedPost("bot:" + first.getId(), first.getMessageId(), first.getPostedAt(), kind, text,
-                views, reactions, list, comments ? items.stream().mapToInt(Post::getComments).sum() : null, null,
+                views, reactions, list, comments ? items.stream().mapToInt(Post::getComments).sum() : null, null, List.of(),
                 Links.post(ch.getTelegramChatId(), ch.getUsername(), ch.isDemo(), first.getMessageId()), null,
                 items.stream().anyMatch(p -> p.getEditedAt() != null), "published");
     }

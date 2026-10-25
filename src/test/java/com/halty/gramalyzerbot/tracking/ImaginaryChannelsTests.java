@@ -225,6 +225,38 @@ class ImaginaryChannelsTests {
     }
 
     @Test
+    void aPublicAlbumShowsEveryPictureInItsPlace() throws Exception {
+        FakeTelegram.Channel c = telegram.channel("cat_pictures", "Cat pictures");
+        c.text("Hello");
+        FakeTelegram.Post album = c.album(3, "Я так більше не можу");
+        c.photo("Just one");
+        Models.Channel own = workspace.registerChannel(CHAT, "Cat pictures", "cat_pictures", true);
+
+        JsonNode feed = feed(own);
+        assertThat(ids(feed)).containsExactly(5, 2, 1); // the album takes ids 2 to 4
+        JsonNode shown = post(feed, album.id);
+        assertThat(shown.path("kind").asText()).isEqualTo("ALBUM");
+        assertThat(shown.path("text").asText()).isEqualTo("Я так більше не можу");
+        JsonNode media = shown.path("media");
+        assertThat(media.size()).isEqualTo(3);
+        for (int i = 0; i < 3; i++) assertThat(media.get(i).path("url").asText()).isEqualTo(c.picture(album.id + i));
+        // the first across the top, the other two side by side below it
+        assertThat(media.get(0).path("w").asDouble()).isEqualTo(1.0);
+        assertThat(media.get(1).path("y").asDouble()).isEqualTo(media.get(2).path("y").asDouble()).isGreaterThan(0.6);
+        assertThat(media.get(2).path("x").asDouble()).isGreaterThan(0.5);
+
+        JsonNode photo = post(feed, 5);
+        assertThat(photo.path("media").size()).isEqualTo(1);
+        assertThat(photo.path("media").get(0).path("h").asDouble()).isEqualTo(0.75);
+        assertThat(post(feed, 1).path("media").size()).isZero();
+
+        // still all there when read back from the database
+        c.text("Later");
+        age("cat_pictures", Duration.ofMinutes(3));
+        assertThat(post(feed(own), album.id).path("media").size()).isEqualTo(3);
+    }
+
+    @Test
     void editsInTheChannelReachTheWebsitesPostList() throws Exception {
         Models.Channel own = workspace.registerChannel(CHAT, "Editors", null, true);
         long ts = Instant.parse("2026-10-20T12:00:00Z").getEpochSecond();

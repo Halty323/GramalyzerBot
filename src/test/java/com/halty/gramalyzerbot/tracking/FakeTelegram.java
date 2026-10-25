@@ -122,10 +122,10 @@ final class FakeTelegram {
             String link = "https://t.me/" + username + "/" + p.id;
             StringBuilder h = new StringBuilder("<div class=\"tgme_widget_message_wrap js-widget_message_wrap\"><div class=\"tgme_widget_message js-widget_message\" data-post=\"")
                     .append(username).append('/').append(p.id).append("\"><div class=\"tgme_widget_message_bubble\">");
-            String picture = "<a class=\"tgme_widget_message_photo_wrap\" href=\"" + link + "\" style=\"width:800px;background-image:url('https://cdn4.telesco.pe/file/"
-                    + username + "-" + p.id + ".jpg')\"></a>";
-            if (p.kind.equals("PHOTO")) h.append(picture);
-            if (p.kind.equals("ALBUM")) h.append("<div class=\"tgme_widget_message_grouped_wrap\">").append(picture).append("</div>");
+            if (p.kind.equals("PHOTO"))
+                h.append("<a class=\"tgme_widget_message_photo_wrap\" href=\"").append(link).append("\" style=\"width:800px;background-image:url('")
+                        .append(picture(p.id)).append("')\"><div class=\"tgme_widget_message_photo\" style=\"padding-top:75%\"></div></a>");
+            if (p.kind.equals("ALBUM")) h.append(album(p));
             if (p.text != null && !p.text.isEmpty())
                 h.append("<div class=\"tgme_widget_message_text js-message_text\" dir=\"auto\">").append(esc(p.text).replace("\n", "<br/>")).append("</div>");
             if (p.reactions > 0)
@@ -135,6 +135,24 @@ final class FakeTelegram {
                     .append(p.edited ? "edited " : "").append("<a class=\"tgme_widget_message_date\" href=\"").append(link).append("\"><time datetime=\"")
                     .append(p.at).append("\" class=\"time\">").append(p.at.toString(), 11, 16).append("</time></a></span></div></div></div></div></div>");
             return h.toString();
+        }
+
+        String picture(int messageId) { return "https://cdn4.telesco.pe/file/" + username + "-" + messageId + ".jpg"; }
+
+        /** Telegram's mosaic, simplified: the first picture across the top, the others in a row below it, 2px apart. */
+        private String album(Post p) {
+            int width = 453, gap = 2, top = 302, below = 150, rest = p.size - 1;
+            StringBuilder h = new StringBuilder("<div class=\"tgme_widget_message_grouped_wrap js-message_grouped_wrap\" style=\"width:").append(width)
+                    .append("px;\"><div class=\"tgme_widget_message_grouped js-message_grouped\"><div class=\"tgme_widget_message_grouped_layer js-message_grouped_layer\" style=\"width:")
+                    .append(width).append("px;height:").append(rest == 0 ? top : top + gap + below).append("px\">");
+            for (int i = 0; i < p.size; i++) {
+                int w = i == 0 ? width : (width - gap * (rest - 1)) / rest;
+                int left = i == 0 ? 0 : (i - 1) * (w + gap);
+                h.append("<a class=\"tgme_widget_message_photo_wrap grouped_media_wrap blured js-message_photo\" href=\"https://t.me/").append(username).append('/')
+                        .append(p.id + i).append("?single\" style=\"left:").append(left).append("px;top:").append(i == 0 ? 0 : top + gap).append("px;width:").append(w)
+                        .append("px;height:").append(i == 0 ? top : below).append("px;background-image:url('").append(picture(p.id + i)).append("')\"></a>");
+            }
+            return h.append("</div></div></div>").toString();
         }
 
         private static String esc(String s) { return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"); }
