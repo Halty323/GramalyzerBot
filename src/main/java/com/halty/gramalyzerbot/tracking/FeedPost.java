@@ -61,9 +61,12 @@ public record FeedPost(String id, Integer messageId, Instant postedAt, String ki
         return out;
     }
 
-    /** For {@code tracked_posts.media}: JSON, with the last pictures left out if all of them don't fit. */
+    /**
+     * For {@code tracked_posts.media}: JSON, with the last pictures left out if all of them don't fit. A post without
+     * pictures gets "[]", so null is left for posts stored before pictures were read like this.
+     */
     static String media(List<Media> media) {
-        if (media == null || media.isEmpty()) return null;
+        if (media == null || media.isEmpty()) return "[]";
         try {
             for (int n = media.size(); n > 0; n--) {
                 String json = JSON.writeValueAsString(media.subList(0, n));
@@ -72,7 +75,7 @@ public record FeedPost(String id, Integer messageId, Instant postedAt, String ki
         } catch (JsonProcessingException e) {
             throw new IllegalStateException(e);
         }
-        return null;
+        return "[]";
     }
 
     static List<Media> media(String json) {

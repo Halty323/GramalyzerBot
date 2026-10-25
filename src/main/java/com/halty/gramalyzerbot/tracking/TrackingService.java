@@ -51,6 +51,8 @@ public class TrackingService {
     private static final int BACKFILL_PAGES = 3;
     /** More posts than one page holds since the last refresh: older pages are read until they meet the stored ones. */
     private static final int GAP_PAGES = 10;
+    /** Kinds whose pictures {@link FeedPost#media()} lists. */
+    private static final Set<String> PICTURES = Set.of("PHOTO", "ALBUM", "VIDEO", "ANIMATION");
 
     private final TrackedChannelRepository channels;
     private final TrackedPostRepository posts;
@@ -236,8 +238,12 @@ public class TrackingService {
         TrackingException failure = null;
         Integer newest = existing == null ? null
                 : posts.findFirstByTrackedChannelIdOrderByMessageIdDesc(existing.getId()).map(TrackedPost::getMessageId).orElse(null);
+        // posts with pictures stored before every picture of an album was read: their pages are read again, once
+        Integer upTo = existing == null ? null : posts(existing).stream()
+                .filter(t -> t.getMedia() == null && t.getMediaUrl() != null && PICTURES.contains(t.getKind()))
+                .map(TrackedPost::getMessageId).min(Integer::compare).orElse(newest);
         try {
-            preview = readPreview(username, newest);
+            preview = readPreview(username, newest, upTo);
         } catch (TrackingException e) {
             failure = e;
         }
@@ -284,9 +290,9 @@ public class TrackingService {
     /**
      * The preview page. The first time ({@code newest} is null: nothing stored yet), older pages too, so the stats start
      * from ~60 posts instead of ~20. Later, when more posts came out than the page holds, older pages until they reach
-     * the newest stored post, so none goes missing in between.
+     * the newest stored post, so none goes missing in between, or further back to message {@code upTo}.
      */
-    private Preview readPreview(String username, Integer newest) {
+    private Preview readPreview(String username, Integer newest, Integer upTo) {
         try {
             PreviewClient.Page page = client.preview(username, null);
             if (page.status() == 404) throw new TrackingException(Code.NOT_FOUND);
@@ -306,7 +312,8 @@ public class TrackingService {
                 // a page of fewer than 10 posts is the whole channel
                 if (p.seen().size() >= 10) p = withOlder(username, p, BACKFILL_PAGES - 1, seen -> seen.size() >= BACKFILL_POSTS);
             } else {
-                p = withOlder(username, p, GAP_PAGES, seen -> Collections.min(seen) <= newest);
+                int back = Math.min(newest, upTo == null ? newest : upTo);
+                p = withOlder(username, p, GAP_PAGES, seen -> Collections.min(seen) <= back);
             }
             return p;
         } catch (IOException e) {

@@ -257,6 +257,31 @@ class ImaginaryChannelsTests {
     }
 
     @Test
+    void albumsStoredBeforeTheUpdateGetTheirPicturesOnce() throws Exception {
+        FakeTelegram.Channel c = telegram.channel("old_albums", "Old albums");
+        FakeTelegram.Post album = c.album(3, "From before");
+        c.burst(24, "Text");
+        Models.Channel own = workspace.registerChannel(CHAT, "Old albums", "old_albums", true);
+        feed(own);
+        // as an older version stored them: the first picture only
+        jdbc.update("UPDATE tracked_posts SET media = NULL");
+        c.text("New");
+        age("old_albums", Duration.ofMinutes(3));
+        int before = telegram.requests("old_albums");
+
+        JsonNode feed = feed(own);
+        assertThat(telegram.requests("old_albums") - before).isEqualTo(2); // the album is on the second page now
+        assertThat(post(feed, album.id).path("media").size()).isEqualTo(3);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tracked_posts WHERE media IS NULL", Integer.class)).isZero();
+
+        // and only once
+        age("old_albums", Duration.ofMinutes(3));
+        before = telegram.requests("old_albums");
+        feed(own);
+        assertThat(telegram.requests("old_albums") - before).isEqualTo(1);
+    }
+
+    @Test
     void editsInTheChannelReachTheWebsitesPostList() throws Exception {
         Models.Channel own = workspace.registerChannel(CHAT, "Editors", null, true);
         long ts = Instant.parse("2026-10-20T12:00:00Z").getEpochSecond();

@@ -93,7 +93,8 @@ class PreviewParserTest {
         assertThat(FeedPost.media(FeedPost.media(media))).isEqualTo(media);
         assertThat(FeedPost.media((String) null)).isEmpty();
         assertThat(FeedPost.media("not json")).isEmpty();
-        assertThat(FeedPost.media(List.of())).isNull();
+        assertThat(FeedPost.media(List.of())).isEqualTo("[]");
+        assertThat(FeedPost.media("[]")).isEmpty();
         // ten pictures with very long addresses: the ones that fit are kept, in order
         List<FeedPost.Media> huge = java.util.stream.IntStream.range(0, 10)
                 .mapToObj(i -> new FeedPost.Media("https://cdn4.telesco.pe/file/" + "x".repeat(1500) + i + ".jpg", false, null, null, null, null)).toList();
