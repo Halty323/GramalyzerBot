@@ -6,6 +6,8 @@ import com.halty.gramalyzerbot.bot.screen.*;
 import com.halty.gramalyzerbot.bot.ui.*;
 import com.halty.gramalyzerbot.channel.*;
 import com.halty.gramalyzerbot.common.UserFacingException;
+import com.halty.gramalyzerbot.crosspromo.SwapProfile;
+import com.halty.gramalyzerbot.crosspromo.SwapService;
 import com.halty.gramalyzerbot.growth.GrowthService;
 import com.halty.gramalyzerbot.growth.PromoInput;
 import com.halty.gramalyzerbot.growth.PromoLink;
@@ -61,6 +63,8 @@ public class PrivateFlow {
     private final InsightScreens insights;
     private final GrowthScreens growthScreens;
     private final GrowthService growth;
+    private final CrossPromoScreens crossPromo;
+    private final SwapService swaps;
     private final SettingsScreens settingsScreens;
     private final TeamScreens team;
     private final AdminScreens admin;
@@ -177,6 +181,7 @@ public class PrivateFlow {
                 if (arg.isBlank()) gateway.send(chat, growthScreens.promo(ch, role));
                 else promoInput(u, chat, ch.getId(), arg);
             });
+            case "swap", "swaps", "crosspromo" -> withChannel(u, chat, (ch, role) -> { users.clearState(u); gateway.send(chat, crossPromo.home(ch, role)); });
             case "team" -> withChannel(u, chat, (ch, role) -> gateway.send(chat, team.home(ch, u, role)));
             case "channels" -> gateway.send(chat, start.channels(channels.forUser(u), u.getActiveChannelId(), u.isBotAdmin()));
             case "watchlist", "watch", "tracked" -> { users.clearState(u); watch.showList(u, chat); }
@@ -328,6 +333,7 @@ public class PrivateFlow {
             case UserState.AWAIT_TRACK -> watch.track(u, chat, text);
             case UserState.AWAIT_TOPIC -> topicInput(u, chat, p.arg(), text);
             case UserState.AWAIT_PROMO -> promoInput(u, chat, Long.parseLong(p.arg()), text);
+            case UserState.AWAIT_SWAP_PITCH -> pitchInput(u, chat, Long.parseLong(p.arg()), text);
             case UserState.AWAIT_BAN -> banInput(u, chat, text);
             case UserState.AWAIT_IMPORT -> gateway.send(chat, View.of(Tr.t("flow.send_file")));
             default -> {
@@ -362,6 +368,17 @@ public class PrivateFlow {
         audit.record(ch.getId(), u.getId(), "promo.create", "Made the promo link \"" + Fmt.trunc(l.getName(), 40) + "\"");
         users.clearState(u);
         gateway.send(chat, growthScreens.created(ch, l));
+    }
+
+    /** One or two lines that partners see before saying yes to a swap; "-" removes it. */
+    private void pitchInput(User u, long chat, long channelId, String text) {
+        Channel ch = access.require(u, channelId, Permission.CHANGE_SETTINGS);
+        SwapProfile p = swaps.profile(ch).orElseThrow(() -> new UserFacingException("swap.err.no_profile"));
+        boolean clear = text.strip().equals("-");
+        swaps.saveProfile(ch, p.getTopic(), p.getLanguage(), clear ? "" : text, p.isEnabled());
+        users.clearState(u);
+        gateway.send(chat, View.of(Tr.t(clear ? "swap.pitch_removed" : "swap.pitch_saved")));
+        gateway.send(chat, crossPromo.home(ch, access.roleOf(u, ch)));
     }
 
     private void topicInput(User u, long chat, String arg, String text) {

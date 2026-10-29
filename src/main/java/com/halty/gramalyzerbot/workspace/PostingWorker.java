@@ -32,6 +32,7 @@ public class PostingWorker {
             try {long messageId=gateway.publish(c,post); store.delivered(post.id(),messageId); announce(c,post,messageId);}
             catch(TelegramApiRequestException e) {boolean uncertain=e.getErrorCode()==null||e.getErrorCode()>=500; store.deliveryFailed(post.id(),uncertain,uncertain?"Delivery outcome is unknown. Check Telegram before creating a replacement.":"Telegram rejected this post. Check permissions and message length before rescheduling.");}
             catch(IllegalArgumentException e) {store.deliveryFailed(post.id(),false,"Message and signature exceed Telegram's limit. Shorten the post before rescheduling.");}
+            catch(IllegalStateException e) {store.deliveryFailed(post.id(),false,"An attached picture or video is missing. Add it again before rescheduling.");}
             catch(Exception e) {store.deliveryFailed(post.id(),true,"Delivery outcome is unknown. Check Telegram before creating a replacement.");}
         }
     }

@@ -30,6 +30,9 @@ public interface PostRepository extends JpaRepository<Post, Long> {
 
     long countByChannelIdAndPostedAtAfter(Long channelId, Instant after);
 
+    @Query("select avg(p.reactions) from Post p where p.channelId = :channelId and p.postedAt > :after")
+    Double averageReactions(@Param("channelId") Long channelId, @Param("after") Instant after);
+
     @Modifying
     @Query("update Post p set p.comments = p.comments + 1 where p.channelId = :channelId and p.messageId = :messageId")
     int incrementComments(@Param("channelId") Long channelId, @Param("messageId") Integer messageId);

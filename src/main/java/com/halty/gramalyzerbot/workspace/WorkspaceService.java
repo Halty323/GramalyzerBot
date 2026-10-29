@@ -12,8 +12,8 @@ import static com.halty.gramalyzerbot.workspace.Models.*;
 @Service
 public class WorkspaceService {
     public static class Problem extends RuntimeException {public final int status; public Problem(int status, String message) {super(message); this.status=status;}}
-    private final WorkspaceStore store; private final ObjectMapper mapper; private final ApplicationEventPublisher events; private final boolean demo; private final boolean botEnabled;
-    public WorkspaceService(WorkspaceStore store, ObjectMapper mapper, ApplicationEventPublisher events, @Value("${gramalyzer.demo:false}") boolean demo, @Value("${telegram.bot.enabled:false}") boolean botEnabled) {this.store=store; this.mapper=mapper; this.events=events; this.demo=demo; this.botEnabled=botEnabled&&!demo;}
+    private final WorkspaceStore store; private final WorkspaceMedia files; private final ObjectMapper mapper; private final ApplicationEventPublisher events; private final boolean demo; private final boolean botEnabled;
+    public WorkspaceService(WorkspaceStore store, WorkspaceMedia files, ObjectMapper mapper, ApplicationEventPublisher events, @Value("${gramalyzer.demo:false}") boolean demo, @Value("${telegram.bot.enabled:false}") boolean botEnabled) {this.store=store; this.files=files; this.mapper=mapper; this.events=events; this.demo=demo; this.botEnabled=botEnabled&&!demo;}
     public Workspace workspace() {return new Workspace(store.channels(), store.posts(), demo, store.history(), botEnabled);}
     public Channel channel(String id) {return store.channel(id).orElseThrow(() -> new Problem(404,"Channel not found."));}
     public Optional<Channel> byTelegramChat(long chatId) {return store.telegramChannel(chatId);}
@@ -33,11 +33,40 @@ public class WorkspaceService {
     public Post save(String id, PostInput input) {
         Channel c = channel(input.channelId());
         if ("scheduled".equals(input.status()) && !input.scheduledAt().isAfter(Instant.now())) throw new Problem(400,"Choose a future date for a scheduled post.");
-        if (input.body().length() + (c.signature().isBlank() ? 0 : c.signature().length() + 2) > 4096) throw new Problem(400,"Message and channel signature together must fit in 4096 characters.");
         Post previous = id == null ? null : post(id);
         if (previous != null && "published".equals(previous.status())) throw new Problem(409,"Published posts cannot be changed here.");
-        Post p = new Post(id == null ? UUID.randomUUID().toString() : id, input.channelId(), input.title().trim(), input.body().trim(), input.status(), input.scheduledAt(), 0, 0, 0, input.category() == null ? "Community" : input.category(), "pending", null, null);
+        List<MediaRef> media = input.media() != null ? checkedMedia(input.media()) : previous == null ? List.of() : previous.media();
+        List<LinkButton> buttons = input.buttons() != null ? checkedButtons(input.buttons()) : previous == null ? List.of() : previous.buttons();
+        boolean silent = input.silent() != null ? input.silent() : previous != null && previous.silent();
+        boolean pin = input.pin() != null ? input.pin() : previous != null && previous.pin();
+        String body = input.body().trim();
+        if (body.isEmpty() && media.isEmpty()) throw new Problem(400,"Write a message or add a picture or video.");
+        int length = body.length() + (c.signature().isBlank() ? 0 : c.signature().length() + 2);
+        if (media.isEmpty() && length > 4096) throw new Problem(400,"Message and channel signature together must fit in 4096 characters.");
+        if (!media.isEmpty() && length > 1024) throw new Problem(400,"With pictures or a video, Telegram allows captions of up to 1024 characters, signature included.");
+        if (media.size() > 1 && !buttons.isEmpty()) throw new Problem(400,"Telegram can't put buttons under an album. Keep one picture or video, or remove the buttons.");
+        if (media.size() > 1 && media.stream().anyMatch(m -> "animation".equals(m.kind()))) throw new Problem(400,"A GIF can't be part of an album. Post it on its own.");
+        Post p = new Post(id == null ? UUID.randomUUID().toString() : id, input.channelId(), input.title().trim(), body, input.status(), input.scheduledAt(), 0, 0, 0, input.category() == null ? "Community" : input.category(), "pending", null, null, media, buttons, silent, pin);
         return id == null ? store.insert(p) : store.update(p);
+    }
+    /** Uploaded files as stored (their kind and name come from the upload, not from what the client says). */
+    private List<MediaRef> checkedMedia(List<MediaRef> media) {
+        if (media.size() > 10) throw new Problem(400,"A post can have up to 10 pictures or videos.");
+        List<MediaRef> out = new ArrayList<>();
+        for (MediaRef m : media) out.add(files.ref(m.id()).orElseThrow(() -> new Problem(400,"An attached file is no longer available. Add it again.")));
+        if (out.stream().map(MediaRef::id).distinct().count() < out.size()) throw new Problem(400,"The same file is attached twice.");
+        return out;
+    }
+    private static List<LinkButton> checkedButtons(List<LinkButton> buttons) {
+        if (buttons.size() > 8) throw new Problem(400,"A post can have up to 8 buttons.");
+        List<LinkButton> out = new ArrayList<>();
+        for (LinkButton b : buttons) {
+            String text = b.text().strip(), url = b.url().strip();
+            if (text.isEmpty() || text.length() > 40) throw new Problem(400,"Button labels need 1 to 40 characters.");
+            if (!url.matches("(?i)(https?://|tg://)[^\\s]+")) throw new Problem(400,"Button links must start with https:// or tg://.");
+            out.add(new LinkButton(text, url));
+        }
+        return out;
     }
     public void delete(String id) {Post p = post(id); if ("published".equals(p.status()) || !store.delete(id)) throw new Problem(409,"This post is published or its delivery needs a review.");}
     public synchronized Channel registerChannel(long chatId, String title, String username, boolean canPost) {
@@ -72,7 +101,7 @@ public class WorkspaceService {
             if (caption == null ? !edited || album != null : !edited && !MEDIA.equals(p.body())) return;
             String body = caption == null ? MEDIA : caption;
             if (body.equals(p.body())) return;
-            store.replace(new Post(p.id(), p.channelId(), ours ? title(body) : p.title(), body, p.status(), p.scheduledAt(), p.views(), p.reactions(), p.shares(), p.category(), p.deliveryState(), p.telegramMessageId(), p.deliveryError()));
+            store.replace(p.withText(ours ? title(body) : p.title(), body));
             return;
         }
         if (edited || store.hasReceipt(c.id(),messageId)) return;

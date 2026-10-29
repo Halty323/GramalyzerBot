@@ -67,7 +67,7 @@ public class GrowthScreens {
         List<Btn> chips = new ArrayList<>();
         for (int d : new int[]{7, 30, 90}) chips.add(Btn.cb((d == days ? "✓ " : "") + Labels.windowShort(d), Cb.of("nav:growth", id, d)));
         v.row(chips.toArray(new Btn[0]));
-        v.row(Btn.cb(Tr.t("btn.promo"), Cb.of("pr:list", id)));
+        v.row(Btn.cb(Tr.t("btn.promo"), Cb.of("pr:list", id)), Btn.cb(Tr.t("btn.swap"), Cb.of("sw:home", id)));
         return v.row(Btn.cb(Tr.t("btn.dashboard"), Cb.of("nav:home", id)));
     }
 
