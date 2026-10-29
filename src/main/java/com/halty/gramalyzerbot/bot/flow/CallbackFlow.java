@@ -7,6 +7,9 @@ import com.halty.gramalyzerbot.bot.screen.*;
 import com.halty.gramalyzerbot.bot.ui.*;
 import com.halty.gramalyzerbot.channel.*;
 import com.halty.gramalyzerbot.common.UserFacingException;
+import com.halty.gramalyzerbot.crosspromo.SwapProfile;
+import com.halty.gramalyzerbot.crosspromo.SwapService;
+import com.halty.gramalyzerbot.crosspromo.Topic;
 import com.halty.gramalyzerbot.growth.GrowthService;
 import com.halty.gramalyzerbot.growth.PromoLink;
 import com.halty.gramalyzerbot.i18n.Lang;
@@ -56,6 +59,8 @@ public class CallbackFlow {
     private final InsightScreens insights;
     private final GrowthScreens growthScreens;
     private final GrowthService growth;
+    private final CrossPromoScreens crossPromo;
+    private final SwapService swaps;
     private final SettingsScreens settingsScreens;
     private final TeamScreens team;
     private final AdminScreens admin;
@@ -111,6 +116,7 @@ public class CallbackFlow {
             case "team" -> teamAction(u, c, a);
             case "pm" -> postModeration(u, c, a);
             case "pr" -> promo(u, c, a);
+            case "sw" -> crossPromo(u, c, a);
             case "adm" -> adminAction(u, c, a);
             case "wl" -> watchlist(u, c, a);
             case "lang" -> language(u, c, a);
@@ -170,6 +176,62 @@ public class CallbackFlow {
                 return Toast.of(Tr.t("toast.link_revoked"));
             }
             default -> throw new IllegalArgumentException("unknown pr " + action);
+        }
+        return Toast.NONE;
+    }
+
+    // ------------------------------------------------------------------ cross-promo
+
+    private Toast crossPromo(User u, Events.Callback c, Cb.Args a) {
+        String action = a.get(1);
+        boolean look = action.equals("home") || action.equals("view");
+        Channel ch = access.require(u, a.getLong(2), look ? Permission.VIEW : Permission.CHANGE_SETTINGS);
+        Role role = access.roleOf(u, ch);
+        Optional<SwapProfile> profile = look ? Optional.empty() : swaps.profile(ch);
+        switch (action) {
+            case "home" -> {
+                users.clearState(u);
+                show(c, crossPromo.home(ch, role));
+            }
+            case "topic" -> show(c, crossPromo.topics(ch, profile.map(SwapProfile::getTopic).orElse(null)));
+            case "settopic" -> show(c, crossPromo.languages(ch, Topic.parse(a.get(3)),
+                    profile.map(SwapProfile::getLanguage).orElse(Lang.of(u).code())));
+            case "setlang" -> {
+                swaps.saveProfile(ch, Topic.parse(a.get(3)), a.get(4), null, profile.map(SwapProfile::isEnabled).orElse(true));
+                audit.record(ch.getId(), u.getId(), "swap.profile", "Set the cross-promo topic and language");
+                show(c, crossPromo.home(ch, role));
+                return Toast.of(Tr.t("toast.saved"));
+            }
+            case "pitch" -> {
+                users.setState(u, UserState.AWAIT_SWAP_PITCH, String.valueOf(ch.getId()), PROMPT_TTL);
+                show(c, crossPromo.pitchPrompt(ch));
+            }
+            case "on", "off" -> {
+                SwapProfile p = profile.orElseThrow(() -> new UserFacingException("swap.err.no_profile"));
+                swaps.saveProfile(ch, p.getTopic(), p.getLanguage(), null, action.equals("on"));
+                show(c, crossPromo.home(ch, role));
+            }
+            case "find" -> show(c, crossPromo.matches(ch));
+            case "ask" -> {
+                var s = swaps.propose(ch, a.getLong(3));
+                audit.record(ch.getId(), u.getId(), "swap.request", "Asked a channel to swap posts");
+                show(c, crossPromo.swap(ch, role, swaps.swapView(ch, s.getId())));
+                return Toast.of(Tr.t("toast.swap_sent"));
+            }
+            case "view" -> show(c, crossPromo.swap(ch, role, swaps.swapView(ch, a.getLong(3))));
+            case "ok", "no", "cx", "end" -> {
+                long id = a.getLong(3);
+                String toast = switch (action) {
+                    case "ok" -> { swaps.accept(ch, id); yield "toast.swap_accepted"; }
+                    case "no" -> { swaps.decline(ch, id); yield "toast.swap_declined"; }
+                    case "cx" -> { swaps.cancel(ch, id); yield "toast.swap_cancelled"; }
+                    default -> { swaps.end(ch, id); yield "toast.swap_ended"; }
+                };
+                audit.record(ch.getId(), u.getId(), "swap." + action, "Answered or closed a cross-promo swap");
+                show(c, crossPromo.swap(ch, role, swaps.swapView(ch, id)));
+                return Toast.of(Tr.t(toast));
+            }
+            default -> throw new IllegalArgumentException("unknown sw " + action);
         }
         return Toast.NONE;
     }

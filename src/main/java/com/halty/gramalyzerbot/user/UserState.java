@@ -10,6 +10,7 @@ public final class UserState {
     public static final String AWAIT_BAN = "AWAIT_BAN";
     public static final String AWAIT_TRACK = "AWAIT_TRACK";
     public static final String AWAIT_PROMO = "AWAIT_PROMO";
+    public static final String AWAIT_SWAP_PITCH = "AWAIT_SWAP_PITCH";
 
     private UserState() {}
 }

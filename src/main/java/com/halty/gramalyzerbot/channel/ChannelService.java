@@ -2,6 +2,8 @@ package com.halty.gramalyzerbot.channel;
 
 import com.halty.gramalyzerbot.common.UserFacingException;
 import com.halty.gramalyzerbot.config.BotProperties;
+import com.halty.gramalyzerbot.crosspromo.SwapProfileRepository;
+import com.halty.gramalyzerbot.crosspromo.SwapRepository;
 import com.halty.gramalyzerbot.growth.MemberEventRepository;
 import com.halty.gramalyzerbot.growth.PromoLinkRepository;
 import com.halty.gramalyzerbot.post.DiscussionRootRepository;
@@ -31,6 +33,8 @@ public class ChannelService {
     private final AuditRepository audit;
     private final MemberEventRepository memberEvents;
     private final PromoLinkRepository promoLinks;
+    private final SwapProfileRepository swapProfiles;
+    private final SwapRepository swaps;
     private final BotProperties props;
 
     public Optional<Channel> byChatId(long chatId) { return channels.findByTelegramChatId(chatId); }
@@ -109,6 +113,9 @@ public class ChannelService {
         snapshots.deleteAllByChannelId(c.getId());
         memberEvents.deleteAllByChannelId(c.getId());
         promoLinks.deleteAllByChannelId(c.getId());
+        swapProfiles.deleteAllByChannelId(c.getId());
+        swaps.deleteAllByFromChannel(c.getId());
+        swaps.deleteAllByToChannel(c.getId());
         invites.deleteAllByChannelId(c.getId());
         audit.deleteAllByChannelId(c.getId());
         members.deleteAllByChannelId(c.getId());
