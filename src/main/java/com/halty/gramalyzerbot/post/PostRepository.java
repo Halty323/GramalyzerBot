@@ -28,6 +28,10 @@ public interface PostRepository extends JpaRepository<Post, Long> {
 
     long countByChannelId(Long channelId);
 
+    List<Post> findTop40ByChannelIdOrderByPostedAtDesc(Long channelId);
+
+    List<Post> findTop60ByChannelIdAndViews1hNotNullOrderByPostedAtDesc(Long channelId);
+
     long countByChannelIdAndPostedAtAfter(Long channelId, Instant after);
 
     @Query("select avg(p.reactions) from Post p where p.channelId = :channelId and p.postedAt > :after")

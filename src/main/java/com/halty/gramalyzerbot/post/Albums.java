@@ -24,6 +24,7 @@ public final class Albums {
             String text = "";
             boolean link = false, excluded = false, known = false;
             int reactions = 0, comments = 0;
+            Integer views = null; // every part of an album shows the same count; take the highest reading
             Set<String> topics = new LinkedHashSet<>();
             for (Sample s : g) {
                 if (text.isEmpty() && !s.text().isEmpty()) text = s.text();
@@ -33,9 +34,10 @@ public final class Albums {
                 reactions += s.reactions();
                 comments += s.comments();
                 topics.addAll(s.topics());
+                if (s.views() != null && (views == null || s.views() > views)) views = s.views();
             }
             out.add(new Sample(first.id(), first.messageId(), first.postedAt(), PostKind.ALBUM, text, link,
-                    new ArrayList<>(topics), reactions, comments, known, excluded, first.mediaGroupId()));
+                    new ArrayList<>(topics), reactions, comments, known, excluded, first.mediaGroupId(), views));
         }
         out.sort(Comparator.comparing(Sample::postedAt).thenComparingInt(Sample::messageId));
         return out;

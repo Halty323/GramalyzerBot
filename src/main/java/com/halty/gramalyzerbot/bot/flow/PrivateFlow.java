@@ -64,6 +64,7 @@ public class PrivateFlow {
     private final GrowthScreens growthScreens;
     private final GrowthService growth;
     private final CrossPromoScreens crossPromo;
+    private final ViewSpeedScreens viewSpeed;
     private final SwapService swaps;
     private final SettingsScreens settingsScreens;
     private final TeamScreens team;
@@ -181,6 +182,7 @@ public class PrivateFlow {
                 if (arg.isBlank()) gateway.send(chat, growthScreens.promo(ch, role));
                 else promoInput(u, chat, ch.getId(), arg);
             });
+            case "speed", "views" -> withChannel(u, chat, (ch, role) -> gateway.send(chat, viewSpeed.list(ch, role)));
             case "swap", "swaps", "crosspromo" -> withChannel(u, chat, (ch, role) -> { users.clearState(u); gateway.send(chat, crossPromo.home(ch, role)); });
             case "team" -> withChannel(u, chat, (ch, role) -> gateway.send(chat, team.home(ch, u, role)));
             case "channels" -> gateway.send(chat, start.channels(channels.forUser(u), u.getActiveChannelId(), u.isBotAdmin()));

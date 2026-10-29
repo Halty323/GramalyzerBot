@@ -60,6 +60,7 @@ public class CallbackFlow {
     private final GrowthScreens growthScreens;
     private final GrowthService growth;
     private final CrossPromoScreens crossPromo;
+    private final ViewSpeedScreens viewSpeed;
     private final SwapService swaps;
     private final SettingsScreens settingsScreens;
     private final TeamScreens team;
@@ -117,6 +118,7 @@ public class CallbackFlow {
             case "pm" -> postModeration(u, c, a);
             case "pr" -> promo(u, c, a);
             case "sw" -> crossPromo(u, c, a);
+            case "vs" -> viewSpeed(u, c, a);
             case "adm" -> adminAction(u, c, a);
             case "wl" -> watchlist(u, c, a);
             case "lang" -> language(u, c, a);
@@ -176,6 +178,24 @@ public class CallbackFlow {
                 return Toast.of(Tr.t("toast.link_revoked"));
             }
             default -> throw new IllegalArgumentException("unknown pr " + action);
+        }
+        return Toast.NONE;
+    }
+
+    // ------------------------------------------------------------------ view speed
+
+    private Toast viewSpeed(User u, Events.Callback c, Cb.Args a) {
+        String action = a.get(1);
+        Channel ch = access.require(u, a.getLong(2), action.equals("pin") ? Permission.MODERATE_POSTS : Permission.VIEW);
+        switch (action) {
+            case "list" -> show(c, viewSpeed.list(ch, access.roleOf(u, ch)));
+            case "pin" -> {
+                if (ch.isDemo()) return new Toast(Tr.t("speed.pin_demo"), true);
+                if (!gateway.pin(ch.getTelegramChatId(), a.getInt(3))) return new Toast(Tr.t("speed.pin_failed"), true);
+                audit.record(ch.getId(), u.getId(), "post.pin", "Pinned a post from a pace alert");
+                return Toast.of(Tr.t("toast.pinned"));
+            }
+            default -> throw new IllegalArgumentException("unknown vs " + action);
         }
         return Toast.NONE;
     }

@@ -46,6 +46,13 @@ public class AnalysisService {
     static Sample toSample(Post p, boolean discussionLinked) {
         boolean commentsKnown = p.getSource() == PostSource.DEMO || (discussionLinked && p.getSource() == PostSource.LIVE);
         return new Sample(p.getId(), p.getMessageId(), p.getPostedAt(), p.getKind(), p.getBody(), p.isHasLink(),
-                PostService.topicsOf(p), p.getReactions(), p.getComments(), commentsKnown, p.isExcluded(), p.getMediaGroupId());
+                PostService.topicsOf(p), p.getReactions(), p.getComments(), commentsKnown, p.isExcluded(), p.getMediaGroupId(), dayViews(p));
+    }
+
+    /** Views a day after posting: the 24-hour mark, or the latest reading of a post that old. */
+    static Integer dayViews(Post p) {
+        if (p.getViews24h() != null) return p.getViews24h();
+        boolean old = p.getViewsCheckedAt() != null && p.getViewsCheckedAt().isAfter(p.getPostedAt().plusSeconds(86_400));
+        return old ? p.getViews() : null;
     }
 }

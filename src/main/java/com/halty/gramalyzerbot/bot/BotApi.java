@@ -11,6 +11,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
+import org.telegram.telegrambots.meta.api.methods.pinnedmessages.PinChatMessage;
 import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.methods.AnswerPreCheckoutQuery;
 import org.telegram.telegrambots.meta.api.methods.GetFile;
@@ -288,6 +289,16 @@ public class BotApi {
         } catch (Exception e) {
             log.debug("getChatMemberCount failed: {}", e.getMessage());
             return Optional.empty();
+        }
+    }
+
+    /** Pins a channel post quietly; false when the bot may not (it needs the "edit messages" right in a channel). */
+    public boolean pin(long chatId, int messageId) {
+        try {
+            return Boolean.TRUE.equals(client().execute(PinChatMessage.builder().chatId(String.valueOf(chatId)).messageId(messageId).disableNotification(true).build()));
+        } catch (Exception e) {
+            log.debug("pinChatMessage failed: {}", e.getMessage());
+            return false;
         }
     }
 

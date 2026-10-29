@@ -36,7 +36,7 @@ public final class AnalysisEngine {
             if (s.postedAt().isBefore(from) || s.postedAt().isAfter(o.now())) continue;
             inWindow++;
             if (s.excluded()) { excluded++; continue; }
-            if (s.postedAt().isAfter(matureBefore)) { immature++; continue; }
+            if (s.postedAt().isAfter(matureBefore) || !o.metric().scores(s)) { immature++; continue; }
             use.add(s);
         }
         use.sort(Comparator.comparing(Sample::postedAt));
@@ -48,7 +48,7 @@ public final class AnalysisEngine {
         int commKnown = 0;
         for (int i = 0; i < n; i++) {
             Sample s = use.get(i);
-            score[i] = o.metric().score(s.reactions(), s.comments(), s.commentsKnown());
+            score[i] = o.metric().score(s);
             v[i] = Math.log1p(score[i]);
             sumScore += score[i];
             sumV += v[i];

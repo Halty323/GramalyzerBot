@@ -44,8 +44,12 @@ public class SettingsService {
         return done(ch, actor, "settings.window", "Analysis window → " + (days == 0 ? "all time" : days + " days"));
     }
 
+    /** Views are read from the public web preview, so only public channels (and samples) have them. */
+    public static boolean viewsKnown(Channel ch) { return ch.isDemo() || (ch.getUsername() != null && !ch.getUsername().isBlank()); }
+
     public Channel setMetric(Channel ch, User actor, Metric metric) {
         guard(ch, actor);
+        if (metric == Metric.VIEWS && !viewsKnown(ch)) throw new UserFacingException("met.err.views");
         ch.setMetric(metric);
         return done(ch, actor, "settings.metric", "Success metric → " + metric.label());
     }
