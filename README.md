@@ -108,6 +108,9 @@ All under `/api`, with the same auth as before (session cookie from `POST /api/l
 | **GET** | **`/api/tracked/{username}?tz=`** | **new:** any public channel, watched or not: info, stats, top posts and the latest ~60 posts (`TrackedDetail`) |
 | **POST** | **`/api/tracked/{username}/refresh`** | **new:** fetch it again now |
 | **DELETE** | **`/api/tracked/{username}`** | **new:** remove it from the watchlist (204) |
+| **GET** | **`/api/channels/{id}/growth?days=30`** | **new:** joins and leaves of an own channel per day, the posts that brought or lost the most people, and promo links (`ChannelGrowth`) |
+| **POST** | **`/api/channels/{id}/promo-links`** | **new:** `{"name": "Shoutout in @friend", "cost": 20, "currency": "$"}` makes an invite link for one promo (needs the bot's "invite users via link" right) |
+| **DELETE** | **`/api/channels/{id}/promo-links/{linkId}`** | **new:** revoke a promo link; the people who joined through it stay counted |
 
 `tz` is an IANA zone (`Europe/Kyiv`) for the posting-hours histogram; UTC by default. Tracking errors also carry a `code` (`invalid_username`, `private_link`, `not_found`, `not_channel`, `unreachable`, `limit`, `not_tracked`) that the website translates.
 
@@ -124,6 +127,15 @@ When `ready`, the response also has:
 * `topPosts` and `audience` (subscriber trend)
 
 "Lift" is a multiplier of the channel's typical engagement.
+
+## Joins, leaves and promo links
+
+An admin bot hears about every subscriber who joins or leaves an own channel (the `chat_member` update, requested in `allowed_updates`). The `growth` package keeps those events, with each person stored only as a one-way hash per channel.
+
+* **Per post.** Each post gets the joins and leaves from its time until the next post (at most 24 h). The bot's 📈 Growth screen, the weekly digest and the website show the posts that brought the most people and those after which people left. Joins through promo links don't count towards posts.
+* **Promo links.** `/promo` (or 🔗 on the Growth screen) makes a named invite link per ad or shoutout, e.g. `Shoutout in @techdaily 20$`. Telegram reports the link with each join, so the bot counts who joined through it, who stayed and the cost per subscriber who stayed.
+* **Leave waves.** When at least 5 people (and 0.5% of the channel) leave within an hour and far more leave than join, team members with nudges on get one alert, at most every 12 hours.
+* Telegram sends nothing from before the bot asked for these updates, so counting starts on deploy. Sample channels get a month of generated joins, leaves and three promo links.
 
 ## Public channel tracking
 

@@ -6,6 +6,9 @@ import com.halty.gramalyzerbot.bot.screen.*;
 import com.halty.gramalyzerbot.bot.ui.*;
 import com.halty.gramalyzerbot.channel.*;
 import com.halty.gramalyzerbot.common.UserFacingException;
+import com.halty.gramalyzerbot.growth.GrowthService;
+import com.halty.gramalyzerbot.growth.PromoInput;
+import com.halty.gramalyzerbot.growth.PromoLink;
 import com.halty.gramalyzerbot.i18n.Lang;
 import com.halty.gramalyzerbot.i18n.Tr;
 import com.halty.gramalyzerbot.post.DemoService;
@@ -56,6 +59,8 @@ public class PrivateFlow {
     private final StartScreens start;
     private final HomeScreen home;
     private final InsightScreens insights;
+    private final GrowthScreens growthScreens;
+    private final GrowthService growth;
     private final SettingsScreens settingsScreens;
     private final TeamScreens team;
     private final AdminScreens admin;
@@ -166,6 +171,12 @@ public class PrivateFlow {
             case "content" -> withChannel(u, chat, (ch, role) -> gateway.send(chat, insights.content(ch, ch.getWindowDays(), "main")));
             case "top" -> withChannel(u, chat, (ch, role) -> gateway.send(chat, insights.top(ch, role, 0)));
             case "settings" -> showSettings(u, chat);
+            case "growth" -> withChannel(u, chat, (ch, role) -> gateway.send(chat, growthScreens.growth(ch, 30)));
+            case "promo", "promos", "links" -> withChannel(u, chat, (ch, role) -> {
+                users.clearState(u);
+                if (arg.isBlank()) gateway.send(chat, growthScreens.promo(ch, role));
+                else promoInput(u, chat, ch.getId(), arg);
+            });
             case "team" -> withChannel(u, chat, (ch, role) -> gateway.send(chat, team.home(ch, u, role)));
             case "channels" -> gateway.send(chat, start.channels(channels.forUser(u), u.getActiveChannelId(), u.isBotAdmin()));
             case "watchlist", "watch", "tracked" -> { users.clearState(u); watch.showList(u, chat); }
@@ -316,6 +327,7 @@ public class PrivateFlow {
             }
             case UserState.AWAIT_TRACK -> watch.track(u, chat, text);
             case UserState.AWAIT_TOPIC -> topicInput(u, chat, p.arg(), text);
+            case UserState.AWAIT_PROMO -> promoInput(u, chat, Long.parseLong(p.arg()), text);
             case UserState.AWAIT_BAN -> banInput(u, chat, text);
             case UserState.AWAIT_IMPORT -> gateway.send(chat, View.of(Tr.t("flow.send_file")));
             default -> {
@@ -340,6 +352,16 @@ public class PrivateFlow {
         users.clearState(u);
         gateway.send(chat, View.of(Tr.t("flow.tz_set", Fmt.esc(TimeZones.label(zones.get(0), java.time.Instant.now())))));
         gateway.send(chat, settingsScreens.home(saved, access.roleOf(u, saved)));
+    }
+
+    /** "Shoutout in @techdaily 20$" makes a promo link named "Shoutout in @techdaily" that cost $20. */
+    private void promoInput(User u, long chat, long channelId, String text) {
+        Channel ch = access.require(u, channelId, Permission.CHANGE_SETTINGS);
+        PromoInput in = PromoInput.parse(text);
+        PromoLink l = growth.create(ch, in.name(), in.cost(), in.currency());
+        audit.record(ch.getId(), u.getId(), "promo.create", "Made the promo link \"" + Fmt.trunc(l.getName(), 40) + "\"");
+        users.clearState(u);
+        gateway.send(chat, growthScreens.created(ch, l));
     }
 
     private void topicInput(User u, long chat, String arg, String text) {

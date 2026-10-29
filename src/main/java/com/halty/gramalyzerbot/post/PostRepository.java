@@ -24,6 +24,8 @@ public interface PostRepository extends JpaRepository<Post, Long> {
 
     Optional<Post> findFirstByChannelIdOrderByPostedAtDesc(Long channelId);
 
+    List<Post> findAllByChannelIdAndPostedAtAfterOrderByPostedAtAsc(Long channelId, Instant after);
+
     long countByChannelId(Long channelId);
 
     long countByChannelIdAndPostedAtAfter(Long channelId, Instant after);

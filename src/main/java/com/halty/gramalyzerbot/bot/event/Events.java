@@ -31,6 +31,18 @@ public final class Events {
         public boolean isGone() { return "left".equals(newStatus) || "kicked".equals(newStatus); }
     }
 
+    /**
+     * Someone's membership in a channel changed: {@code wasMember}/{@code isMember} say whether they were and are
+     * subscribed. {@code inviteLink} is the link they joined through (shown in full only for links the bot made).
+     */
+    public record MemberChange(long chatId, String chatType, long userId, boolean isBot, boolean wasMember, boolean isMember,
+                               String inviteLink, Instant date) {
+
+        public boolean joined() { return !wasMember && isMember; }
+
+        public boolean left() { return wasMember && !isMember; }
+    }
+
     public record DocumentInfo(String fileId, String name, long size) {}
 
     /** A post forwarded from a channel (used to link a channel by forwarding one of its posts). */

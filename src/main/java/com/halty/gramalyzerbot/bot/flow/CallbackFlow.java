@@ -7,6 +7,8 @@ import com.halty.gramalyzerbot.bot.screen.*;
 import com.halty.gramalyzerbot.bot.ui.*;
 import com.halty.gramalyzerbot.channel.*;
 import com.halty.gramalyzerbot.common.UserFacingException;
+import com.halty.gramalyzerbot.growth.GrowthService;
+import com.halty.gramalyzerbot.growth.PromoLink;
 import com.halty.gramalyzerbot.i18n.Lang;
 import com.halty.gramalyzerbot.i18n.Tr;
 import com.halty.gramalyzerbot.post.AnalysisService;
@@ -52,6 +54,8 @@ public class CallbackFlow {
     private final StartScreens start;
     private final HomeScreen home;
     private final InsightScreens insights;
+    private final GrowthScreens growthScreens;
+    private final GrowthService growth;
     private final SettingsScreens settingsScreens;
     private final TeamScreens team;
     private final AdminScreens admin;
@@ -106,6 +110,7 @@ public class CallbackFlow {
             case "me" -> me(u, c, a);
             case "team" -> teamAction(u, c, a);
             case "pm" -> postModeration(u, c, a);
+            case "pr" -> promo(u, c, a);
             case "adm" -> adminAction(u, c, a);
             case "wl" -> watchlist(u, c, a);
             case "lang" -> language(u, c, a);
@@ -137,8 +142,34 @@ public class CallbackFlow {
             case "content" -> show(c, insights.content(ch, a.getInt(3), a.get(4)));
             case "top" -> show(c, insights.top(ch, role, a.getInt(3)));
             case "excluded" -> show(c, insights.excluded(ch, role));
-            case "growth" -> show(c, insights.growth(ch, a.getInt(3)));
+            case "growth" -> show(c, growthScreens.growth(ch, a.getInt(3)));
             default -> throw new IllegalArgumentException("unknown nav " + a.get(1));
+        }
+        return Toast.NONE;
+    }
+
+    // ------------------------------------------------------------------ promo links
+
+    private Toast promo(User u, Events.Callback c, Cb.Args a) {
+        String action = a.get(1);
+        Channel ch = access.require(u, a.getLong(2), action.equals("list") ? Permission.VIEW : Permission.CHANGE_SETTINGS);
+        switch (action) {
+            case "list" -> {
+                users.clearState(u);
+                show(c, growthScreens.promo(ch, access.roleOf(u, ch)));
+            }
+            case "new" -> {
+                users.setState(u, UserState.AWAIT_PROMO, String.valueOf(ch.getId()), PROMPT_TTL);
+                show(c, growthScreens.promoPrompt(ch));
+            }
+            case "rv" -> show(c, growthScreens.confirmRevoke(ch, growth.link(ch, a.getLong(3))));
+            case "rvgo" -> {
+                PromoLink l = growth.revoke(ch, a.getLong(3));
+                audit.record(ch.getId(), u.getId(), "promo.revoke", "Revoked the promo link \"" + Fmt.trunc(l.getName(), 40) + "\"");
+                show(c, growthScreens.promo(ch, access.roleOf(u, ch)));
+                return Toast.of(Tr.t("toast.link_revoked"));
+            }
+            default -> throw new IllegalArgumentException("unknown pr " + action);
         }
         return Toast.NONE;
     }

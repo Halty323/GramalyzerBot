@@ -7,6 +7,7 @@ import com.halty.gramalyzerbot.bot.ui.*;
 import com.halty.gramalyzerbot.channel.Channel;
 import com.halty.gramalyzerbot.channel.Links;
 import com.halty.gramalyzerbot.channel.SubscriberService;
+import com.halty.gramalyzerbot.growth.GrowthService;
 import com.halty.gramalyzerbot.post.AnalysisService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -24,6 +25,7 @@ public class DigestBuilder {
 
     private final AnalysisService analysis;
     private final SubscriberService subscribers;
+    private final GrowthService growth;
 
     record Week(int posts, int reactions, int comments) {}
 
@@ -54,6 +56,12 @@ public class DigestBuilder {
         }
         SubscriberService.Growth g = subscribers.growth(ch, 7);
         if (g.current() != null) v.line(Tr.t("digest.subscribers", Fmt.num(g.current())) + (g.change() == null ? "" : " (" + Tr.t("digest.this_week", Fmt.signed(g.change())) + ")"));
+        GrowthService.Report flow = growth.report(ch, 7);
+        if (flow.tracking() && (flow.joined() > 0 || flow.left() > 0)) {
+            v.line(Tr.t("digest.flow", Fmt.num(flow.joined()), Fmt.num(flow.left())));
+            flow.gainers().stream().findFirst().ifPresent(p -> v.line(Tr.t("digest.flow_best",
+                    Fmt.esc(Fmt.trunc(p.preview().isBlank() ? Labels.kind(p.kind()) : p.preview(), 50)), Fmt.num(p.joined()))));
+        }
 
         List<String> play = Playbook.lines(analysis.report(ch));
         if (!play.isEmpty()) {

@@ -93,6 +93,9 @@ public class Channel {
     @Column(name = "last_nudge_at")
     private Instant lastNudgeAt;
 
+    @Column(name = "last_leave_alert_at")
+    private Instant lastLeaveAlertAt;
+
     @PrePersist
     void onCreate() {
         if (connectedAt == null) connectedAt = Instant.now();

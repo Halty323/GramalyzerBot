@@ -18,7 +18,7 @@ import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 
-/** The analysis screens: best times, what to write, top posts and growth. */
+/** The analysis screens: best times, what to write and top posts. Growth lives in {@link GrowthScreens}. */
 @Component
 @RequiredArgsConstructor
 public class InsightScreens {
@@ -29,7 +29,6 @@ public class InsightScreens {
     private static final int[] WINDOWS = {30, 90, 180, 0};
 
     private final AnalysisService analysis;
-    private final SubscriberService subscribers;
     private final BillingService billing;
     private final PlanScreens plans;
 
@@ -290,28 +289,7 @@ public class InsightScreens {
         return v.row(Btn.cb(Tr.t("top.btn.back"), Cb.of("nav:top", id, 0)));
     }
 
-    // ------------------------------------------------------------------ growth
-
-    public View growth(Channel ch, int days) {
-        View paused = paused(ch);
-        if (paused != null) return paused;
-        SubscriberService.Growth g = subscribers.growth(ch, days);
-        View v = new View().line(Tr.t("growth.title")).line("<i>" + Fmt.esc(ch.getTitle()) + " · " + Labels.window(days) + "</i>").blank();
-        if (g.current() != null) v.line(Tr.t("growth.now", Fmt.num(g.current())));
-        if (g.series().size() < 2 || g.change() == null) {
-            v.line(Tr.t("growth.need_days"));
-        } else {
-            double perDay = g.change() / (double) days;
-            v.line((g.change() >= 0 ? "▲ " : "▼ ") + Tr.t("growth.change", Fmt.signed(g.change()), Labels.window(days), (perDay >= 0 ? "+" : "") + Fmt.one(perDay)));
-            v.line("<pre>" + Fmt.sparkline(downsample(g.series(), 40)) + "</pre>");
-            v.line("<i>" + Fmt.num(g.series().get(0)) + " → " + Fmt.num(g.series().get(g.series().size() - 1)) + "</i>");
-        }
-        long id = ch.getId();
-        List<Btn> chips = new ArrayList<>();
-        for (int d : new int[]{30, 90, 180}) chips.add(Btn.cb((d == days ? "✓ " : "") + Labels.windowShort(d), Cb.of("nav:growth", id, d)));
-        v.row(chips.toArray(new Btn[0]));
-        return v.row(Btn.cb(Tr.t("btn.dashboard"), Cb.of("nav:home", id)));
-    }
+    // ------------------------------------------------------------------ charts
 
     static List<Integer> downsample(List<Integer> in, int max) {
         if (in.size() <= max) return in;
