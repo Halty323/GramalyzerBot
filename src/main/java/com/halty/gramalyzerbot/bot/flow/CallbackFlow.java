@@ -61,6 +61,8 @@ public class CallbackFlow {
     private final GrowthService growth;
     private final CrossPromoScreens crossPromo;
     private final ViewSpeedScreens viewSpeed;
+    private final GapScreens gapScreens;
+    private final SearchCheckScreens searchCheck;
     private final SwapService swaps;
     private final SettingsScreens settingsScreens;
     private final TeamScreens team;
@@ -119,6 +121,14 @@ public class CallbackFlow {
             case "pr" -> promo(u, c, a);
             case "sw" -> crossPromo(u, c, a);
             case "vs" -> viewSpeed(u, c, a);
+            case "gap" -> {
+                show(c, gapScreens.list(access.require(u, a.getLong(2), Permission.VIEW), u));
+                yield Toast.NONE;
+            }
+            case "seo" -> {
+                show(c, searchCheck.show(access.require(u, a.getLong(2), Permission.VIEW)));
+                yield Toast.NONE;
+            }
             case "adm" -> adminAction(u, c, a);
             case "wl" -> watchlist(u, c, a);
             case "lang" -> language(u, c, a);
