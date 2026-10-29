@@ -4,7 +4,7 @@ The shared Java 25 / Spring Boot backend behind the Gramalyzer admin website ([G
 
 | Module | Package | What it does |
 |---|---|---|
-| **CRM workspace** | `workspace` | The website's internal REST API (`/api`): channels, the text-post queue, the delivery worker, observed subscriber history, demo data. |
+| **CRM workspace** | `workspace` | The website's internal REST API (`/api`): channels, the post queue (text, pictures, albums, video, GIFs, link buttons), the delivery worker, observed subscriber history, demo data. |
 | **Channel analytics** | `analytics`, `bot`, `channel`, `post`, `user`, `settings`, `scheduler` | The Telegram bot: works out **when to post** and **what to write about**, configured entirely in Telegram DMs, with Owner / Admin / Moderator roles, invites, weekly digests and "good time to post" nudges. |
 | **Bridge** | `crm` | Keeps the two in step and serves the analysis and the channel viewer's feed to the website (`GET /api/channels/{id}/insights`, `/feed`). |
 | **Public channel tracking** | `tracking` | Watchlists of public channels nobody had to add the bot to, for both the website and the bot: subscribers, average views, engagement rate, posting rhythm, top posts and subscriber history, read from Telegram's public web preview. |
@@ -99,7 +99,7 @@ All under `/api`, with the same auth as before (session cookie from `POST /api/l
 | POST | `/api/login` | unchanged |
 | GET | `/api/workspace` | unchanged |
 | PATCH | `/api/channels/{id}` | unchanged. A `timezone` change now also reaches the bot. |
-| POST / PATCH / DELETE | `/api/posts[/{id}]` | unchanged |
+| POST / PATCH / DELETE | `/api/posts[/{id}]` | posts can now carry `media` (up to 10 uploads from `/api/media`), `buttons` (`[{text, url}]`, up to 8), `silent` and `pin`. Left out on PATCH, they keep their values. |
 | GET | `/api/channels/{id}/insights` | the analysis for one channel (`ChannelInsights` in `shared/types.ts`) |
 | **GET** | **`/api/channels/{id}/feed?tz=`** | **new:** the channel's messages for the viewer (`ChannelFeed`). `source` says where they came from: `preview` (the public web preview, with views and reactions), `bot` (what the bot collected) or `workspace` (the website's own posts). Scheduled posts are always included. |
 | GET | `/api/channels/{id}/photo` | the channel's Telegram profile photo (JPEG), fetched by the bot so its token stays on the server. 404 when the channel has none or the bot hasn't seen it. Cached for an hour, with an `ETag`. |
@@ -111,6 +111,12 @@ All under `/api`, with the same auth as before (session cookie from `POST /api/l
 | **GET** | **`/api/channels/{id}/growth?days=30`** | **new:** joins and leaves of an own channel per day, the posts that brought or lost the most people, and promo links (`ChannelGrowth`) |
 | **POST** | **`/api/channels/{id}/promo-links`** | **new:** `{"name": "Shoutout in @friend", "cost": 20, "currency": "$"}` makes an invite link for one promo (needs the bot's "invite users via link" right) |
 | **DELETE** | **`/api/channels/{id}/promo-links/{linkId}`** | **new:** revoke a promo link; the people who joined through it stay counted |
+| **GET** | **`/api/channels/{id}/cross-promo`** | **new:** the channel's cross-promo profile, partners that fit and swaps with what each side's post brought (`CrossPromo`) |
+| **PUT** | **`/api/channels/{id}/cross-promo/profile`** | **new:** `{"topic": "TECH", "language": "en", "pitch": "…", "enabled": true}` |
+| **POST** | **`/api/channels/{id}/cross-promo/swaps`** | **new:** `{"partner": 42}` asks a matched channel to swap posts |
+| **POST** | **`/api/channels/{id}/cross-promo/swaps/{swapId}/{accept,decline,cancel,end}`** | **new:** answer, take back or end a swap; accepting makes a promo link in both channels |
+| **POST** | **`/api/media?name=`** | **new:** upload a picture, GIF or video for a queued post (raw body with its `Content-Type`; 10 MB for pictures, 50 MB otherwise). Returns `{id, kind, name}` for the post's `media` list. Unused uploads are removed after a day. |
+| GET | `/api/media/{id}` | an uploaded file |
 
 `tz` is an IANA zone (`Europe/Kyiv`) for the posting-hours histogram; UTC by default. Tracking errors also carry a `code` (`invalid_username`, `private_link`, `not_found`, `not_channel`, `unreachable`, `limit`, `not_tracked`) that the website translates.
 
@@ -136,6 +142,12 @@ An admin bot hears about every subscriber who joins or leaves an own channel (th
 * **Promo links.** `/promo` (or 🔗 on the Growth screen) makes a named invite link per ad or shoutout, e.g. `Shoutout in @techdaily 20$`. Telegram reports the link with each join, so the bot counts who joined through it, who stayed and the cost per subscriber who stayed.
 * **Leave waves.** When at least 5 people (and 0.5% of the channel) leave within an hour and far more leave than join, team members with nudges on get one alert, at most every 12 hours.
 * Telegram sends nothing from before the bot asked for these updates, so counting starts on deploy. Sample channels get a month of generated joins, leaves and three promo links.
+
+## Cross-promo
+
+Channels that use Gramalyzer can swap posts (🤝 on the Growth screen, `/swap`, or the website's Insights page). A channel opts in with a topic and language (`crosspromo` package). Partners post in the same language, have the same or a related topic, and are at least a fifth of each other's size; the fit score weighs topic (45%), size (35%) and reactions per subscriber (20%). Channels with the same owner and pairs with an open swap aren't suggested.
+
+A request goes to the partner's admins in the bot with Accept and Decline buttons. On accept both channels get a promo link named `Swap: <partner>`, so each side sees how many people the other's post brought and who stayed. The partner's link and owner's @username show only after a yes. A channel can have 5 unanswered requests at a time. Sample channels get eight sample partners (who say yes at once), a running swap and one request to answer.
 
 ## Public channel tracking
 
