@@ -23,7 +23,7 @@ public class WorkspaceStore {
     public Optional<Channel> telegramChannel(long chatId) {return channels().stream().filter(c -> Objects.equals(c.telegramChatId(), chatId)).findFirst();}
     private Post mapPost(ResultSet rs, int row) throws SQLException {
         Post p = read(rs.getString("data"), Post.class);
-        return new Post(p.id(), p.channelId(), p.title(), p.body(), rs.getString("status"), p.scheduledAt(), p.views(), p.reactions(), p.shares(), p.category(), rs.getString("delivery_state"), rs.getObject("telegram_message_id", Long.class), rs.getString("delivery_error"));
+        return p.withDelivery(rs.getString("status"), rs.getString("delivery_state"), rs.getObject("telegram_message_id", Long.class), rs.getString("delivery_error"));
     }
     public List<Post> posts() {return jdbc.query("SELECT * FROM workspace_posts ORDER BY created_at DESC, id", this::mapPost);}
     public Optional<Post> post(String id) {return jdbc.query("SELECT * FROM workspace_posts WHERE id=?", this::mapPost, id).stream().findFirst();}

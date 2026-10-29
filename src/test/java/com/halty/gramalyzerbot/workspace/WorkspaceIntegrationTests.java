@@ -24,7 +24,7 @@ class WorkspaceIntegrationTests {
     @MockitoBean TelegramGateway gateway;
     static final String AUTH="Bearer test-only-workspace-token";
     Channel channel;
-    @BeforeEach void reset() {jdbc.update("DELETE FROM channel_daily_metrics"); jdbc.update("DELETE FROM workspace_posts"); jdbc.update("DELETE FROM workspace_channels"); channel=service.registerChannel(-1001234L,"Test channel","test_channel",true);}
+    @BeforeEach void reset() {jdbc.update("DELETE FROM workspace_media"); jdbc.update("DELETE FROM channel_daily_metrics"); jdbc.update("DELETE FROM workspace_posts"); jdbc.update("DELETE FROM workspace_channels"); channel=service.registerChannel(-1001234L,"Test channel","test_channel",true);}
     String postJson(String status, Instant at) throws Exception {return mapper.writeValueAsString(Map.of("channelId",channel.id(),"title","Community update","body","Hello from the shared backend!","status",status,"scheduledAt",at.toString(),"category","Community"));}
     @Test void authenticatesBrowsersAndApiClients() throws Exception {
         http.perform(get("/api/workspace")).andExpect(status().isUnauthorized());
@@ -88,5 +88,43 @@ class WorkspaceIntegrationTests {
         store.insert(new Post("interrupted",channel.id(),"Due","Hello","scheduled",Instant.now().minusSeconds(60),0,0,0,"Community","pending",null,null));
         assertThat(store.claim("interrupted")).isTrue(); assertThat(store.claim("interrupted")).isFalse(); store.recoverInterrupted();
         assertThat(service.post("interrupted").deliveryState()).isEqualTo("uncertain"); assertThat(store.due()).isEmpty();
+    }
+    String upload(String type, String name, byte[] data) throws Exception {
+        var r=http.perform(post("/api/media").param("name",name).header("Authorization",AUTH).contentType(type).content(data)).andExpect(status().isCreated()).andReturn();
+        return mapper.readTree(r.getResponse().getContentAsString()).path("id").asText();
+    }
+    String mediaPost(String body, java.util.List<String> media, java.util.List<Map<String,String>> buttons) throws Exception {
+        var m=new java.util.HashMap<String,Object>(Map.of("channelId",channel.id(),"title","With pictures","body",body,"status","scheduled","scheduledAt",Instant.now().plusSeconds(3600).toString(),"silent",true,"pin",true));
+        m.put("media",media.stream().map(id->Map.of("id",id,"kind","photo","name","x")).toList()); m.put("buttons",buttons);
+        return mapper.writeValueAsString(m);
+    }
+    @Test void postsCanCarryPicturesVideosAndButtons() throws Exception {
+        byte[] jpeg={(byte)0xFF,(byte)0xD8,(byte)0xFF,1,2,3};
+        String photo=upload("image/jpeg","cover.jpg",jpeg), video=upload("video/mp4","clip.mp4",new byte[]{0,0,0,24}), gif=upload("image/gif","fun.gif",new byte[]{71,73,70});
+        http.perform(get("/api/media/"+photo).header("Authorization",AUTH)).andExpect(status().isOk()).andExpect(content().contentType("image/jpeg")).andExpect(content().bytes(jpeg));
+        http.perform(post("/api/media").header("Authorization",AUTH).contentType("application/pdf").content(new byte[]{1})).andExpect(status().isUnsupportedMediaType());
+
+        var made=http.perform(post("/api/posts").header("Authorization",AUTH).contentType("application/json").content(mediaPost("",java.util.List.of(video),java.util.List.of(Map.of("text","Read more","url","https://example.com")))))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.media[0].kind").value("video")).andExpect(jsonPath("$.buttons[0].text").value("Read more")).andExpect(jsonPath("$.pin").value(true)).andReturn();
+        String id=mapper.readTree(made.getResponse().getContentAsString()).path("id").asText();
+        // an older client (Studio) that knows nothing about media keeps them when it edits the text
+        http.perform(patch("/api/posts/"+id).header("Authorization",AUTH).contentType("application/json").content(postJson("scheduled",Instant.now().plusSeconds(7200)))).andExpect(status().isOk());
+        Post kept=service.post(id); assertThat(kept.media()).extracting(MediaRef::id).containsExactly(video); assertThat(kept.buttons()).hasSize(1); assertThat(kept.silent()).isTrue();
+
+        // what Telegram can't do is refused before it's queued
+        http.perform(post("/api/posts").header("Authorization",AUTH).contentType("application/json").content(mediaPost("Album",java.util.List.of(photo,video),java.util.List.of(Map.of("text","Go","url","https://example.com"))))).andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("album")));
+        http.perform(post("/api/posts").header("Authorization",AUTH).contentType("application/json").content(mediaPost("Album",java.util.List.of(photo,gif),java.util.List.of()))).andExpect(status().isBadRequest());
+        http.perform(post("/api/posts").header("Authorization",AUTH).contentType("application/json").content(mediaPost("x".repeat(1100),java.util.List.of(photo),java.util.List.of()))).andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("1024")));
+        http.perform(post("/api/posts").header("Authorization",AUTH).contentType("application/json").content(mediaPost("",java.util.List.of(),java.util.List.of()))).andExpect(status().isBadRequest());
+        http.perform(post("/api/posts").header("Authorization",AUTH).contentType("application/json").content(mediaPost("Hi",java.util.List.of("missing"),java.util.List.of()))).andExpect(status().isBadRequest());
+        http.perform(post("/api/posts").header("Authorization",AUTH).contentType("application/json").content(mediaPost("Hi",java.util.List.of(),java.util.List.of(Map.of("text","Bad","url","javascript:alert(1)"))))).andExpect(status().isBadRequest());
+        http.perform(post("/api/posts").header("Authorization",AUTH).contentType("application/json").content(mediaPost("A whole album",java.util.List.of(photo,video),java.util.List.of()))).andExpect(status().isCreated());
+    }
+    @Test void unusedUploadsAreRemovedAfterADay(@Autowired WorkspaceMedia files) throws Exception {
+        String used=upload("image/png","a.png",new byte[]{1}), unused=upload("image/png","b.png",new byte[]{2});
+        http.perform(post("/api/posts").header("Authorization",AUTH).contentType("application/json").content(mediaPost("Hi",java.util.List.of(used),java.util.List.of()))).andExpect(status().isCreated());
+        jdbc.update("UPDATE workspace_media SET created_at=?",java.time.OffsetDateTime.now().minusDays(2));
+        files.removeUnused();
+        assertThat(files.ref(used)).isPresent(); assertThat(files.ref(unused)).isEmpty();
     }
 }
