@@ -260,7 +260,7 @@ public class GrowthService {
 
     // ------------------------------------------------------------------ demo
 
-    /** Gives a sample channel a month of joins and leaves and three promo links the first time it's looked at. */
+    /** Gives a sample channel two months of joins and leaves and three promo links the first time it's looked at. */
     private void ensureDemo(Channel ch) {
         if (events.findFirstByChannelIdOrderByAtAsc(ch.getId()).isPresent() || links.countByChannelId(ch.getId()) > 0) return;
         Instant now = Instant.now();
@@ -268,7 +268,7 @@ public class GrowthService {
         int subs = ch.getSubscribers() == null ? 5_000 : Math.max(500, ch.getSubscribers());
         List<MemberEvent> rows = new ArrayList<>();
         List<Long> joiners = new ArrayList<>();
-        Instant from = now.minus(Duration.ofDays(30));
+        Instant from = now.minus(Duration.ofDays(60));
 
         // organic: a steady trickle, more after well-liked posts and some leaves after link-heavy ones
         double perHour = subs * 0.0012 / 24;
