@@ -5,6 +5,8 @@ import com.halty.gramalyzerbot.analytics.TextFeatures;
 import com.halty.gramalyzerbot.bot.event.Events;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
+import org.telegram.telegrambots.meta.api.objects.chatmember.ChatMember;
+import org.telegram.telegrambots.meta.api.objects.chatmember.ChatMemberRestricted;
 import org.telegram.telegrambots.meta.api.objects.chatmember.ChatMemberUpdated;
 import org.telegram.telegrambots.meta.api.objects.message.Message;
 import org.telegram.telegrambots.meta.api.objects.Update;
@@ -32,6 +34,7 @@ public class UpdateMapper {
         if (u.getChannelPost() != null) return Optional.of(channelPost(u.getChannelPost(), false));
         if (u.getEditedChannelPost() != null) return Optional.of(channelPost(u.getEditedChannelPost(), true));
         if (u.getMyChatMember() != null) return Optional.ofNullable(membership(u.getMyChatMember()));
+        if (u.getChatMember() != null) return Optional.ofNullable(memberChange(u.getChatMember()));
         if (u.getMessageReactionCount() != null) {
             var rc = u.getMessageReactionCount();
             int total = 0;
@@ -126,6 +129,23 @@ public class UpdateMapper {
         if (m.getDocument() != null) return PostKind.DOCUMENT;
         if (m.getText() != null) return PostKind.TEXT;
         return PostKind.OTHER;
+    }
+
+    private Object memberChange(ChatMemberUpdated u) {
+        var who = u.getNewChatMember().getUser();
+        if (who == null) return null;
+        String link = u.getInviteLink() == null ? null : u.getInviteLink().getInviteLink();
+        Instant at = u.getDate() == null ? Instant.now() : Instant.ofEpochSecond(u.getDate());
+        return new Events.MemberChange(u.getChat().getId(), u.getChat().getType(), who.getId(), Boolean.TRUE.equals(who.getIsBot()),
+                isMember(u.getOldChatMember()), isMember(u.getNewChatMember()), link, at);
+    }
+
+    /** Subscribed, whatever their rank: owners, admins, members and restricted people who are still in. */
+    static boolean isMember(ChatMember m) {
+        if (m == null) return false;
+        if (m instanceof ChatMemberRestricted r) return Boolean.TRUE.equals(r.getIsMember());
+        String s = m.getStatus();
+        return "creator".equals(s) || "administrator".equals(s) || "member".equals(s);
     }
 
     private Object membership(ChatMemberUpdated u) {

@@ -2,6 +2,8 @@ package com.halty.gramalyzerbot.channel;
 
 import com.halty.gramalyzerbot.common.UserFacingException;
 import com.halty.gramalyzerbot.config.BotProperties;
+import com.halty.gramalyzerbot.growth.MemberEventRepository;
+import com.halty.gramalyzerbot.growth.PromoLinkRepository;
 import com.halty.gramalyzerbot.post.DiscussionRootRepository;
 import com.halty.gramalyzerbot.post.PostRepository;
 import com.halty.gramalyzerbot.user.User;
@@ -27,6 +29,8 @@ public class ChannelService {
     private final DiscussionRootRepository roots;
     private final SubscriberSnapshotRepository snapshots;
     private final AuditRepository audit;
+    private final MemberEventRepository memberEvents;
+    private final PromoLinkRepository promoLinks;
     private final BotProperties props;
 
     public Optional<Channel> byChatId(long chatId) { return channels.findByTelegramChatId(chatId); }
@@ -92,6 +96,7 @@ public class ChannelService {
         posts.deleteAllByChannel(c.getId());
         roots.deleteAllByChannelId(c.getId());
         snapshots.deleteAllByChannelId(c.getId());
+        memberEvents.deleteAllByChannelId(c.getId());
         c.setHistoryImported(false);
         channels.save(c);
     }
@@ -102,6 +107,8 @@ public class ChannelService {
         posts.deleteAllByChannel(c.getId());
         roots.deleteAllByChannelId(c.getId());
         snapshots.deleteAllByChannelId(c.getId());
+        memberEvents.deleteAllByChannelId(c.getId());
+        promoLinks.deleteAllByChannelId(c.getId());
         invites.deleteAllByChannelId(c.getId());
         audit.deleteAllByChannelId(c.getId());
         members.deleteAllByChannelId(c.getId());

@@ -25,10 +25,15 @@ public class InsightsService {
     /** @throws WorkspaceService.Problem (404) when the CRM has no such channel */
     public Insights forChannel(String workspaceChannelId) {
         Models.Channel crm = workspace.channel(workspaceChannelId);
-        Optional<Channel> found = bridge.analyticsFor(crm);
-        if (found.isEmpty()) found = demoData.ensure(crm);
+        Optional<Channel> found = analyticsChannel(crm);
         if (found.isEmpty()) return Insights.notConnected(crm.id(), crm.timezone());
         Channel ch = found.get();
         return Insights.of(crm.id(), ch, analysis.report(ch), subscribers.growth(ch, 30), Instant.now());
+    }
+
+    /** The bot's side of a CRM channel (a sample twin in demo mode); empty when the bot isn't in the channel. */
+    public Optional<Channel> analyticsChannel(Models.Channel crm) {
+        Optional<Channel> found = bridge.analyticsFor(crm);
+        return found.isPresent() ? found : demoData.ensure(crm);
     }
 }

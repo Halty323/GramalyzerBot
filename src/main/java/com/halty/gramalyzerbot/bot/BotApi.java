@@ -16,10 +16,12 @@ import org.telegram.telegrambots.meta.api.methods.AnswerPreCheckoutQuery;
 import org.telegram.telegrambots.meta.api.methods.GetFile;
 import org.telegram.telegrambots.meta.api.methods.GetMe;
 import org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands;
+import org.telegram.telegrambots.meta.api.methods.groupadministration.CreateChatInviteLink;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChat;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChatMember;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChatMemberCount;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.LeaveChat;
+import org.telegram.telegrambots.meta.api.methods.groupadministration.RevokeChatInviteLink;
 import org.telegram.telegrambots.meta.api.methods.invoices.CreateInvoiceLink;
 import org.telegram.telegrambots.meta.api.methods.payments.RefundStarPayment;
 import org.telegram.telegrambots.meta.api.methods.payments.star.EditUserStarSubscription;
@@ -65,13 +67,13 @@ import java.util.function.Supplier;
 public class BotApi {
 
     /**
-     * The update types the bot consumes. message_reaction_count must be requested explicitly, on every poll:
+     * The update types the bot consumes. chat_member and message_reaction_count must be requested explicitly, on every poll:
      * an empty list (the library's default) tells Telegram to fall back to its default set, which has no reactions.
      * See {@link BotRegistration}.
      */
     static final List<String> ALLOWED_UPDATES = List.of(
-            "message", "callback_query", "channel_post", "edited_channel_post", "my_chat_member", "message_reaction_count",
-            "pre_checkout_query");
+            "message", "callback_query", "channel_post", "edited_channel_post", "my_chat_member", "chat_member",
+            "message_reaction_count", "pre_checkout_query");
 
     public record ChatInfo(long id, String type, String title, String username, Long linkedChatId, String description) {}
 
@@ -96,7 +98,7 @@ public class BotApi {
     }
 
     /** The commands in Telegram's menu, in order; their descriptions are {@code cmd.<name>} in each language. */
-    static final List<String> COMMANDS = List.of("menu", "overview", "times", "content", "top", "watchlist", "track", "settings",
+    static final List<String> COMMANDS = List.of("menu", "overview", "times", "content", "top", "growth", "promo", "watchlist", "track", "settings",
             "team", "channels", "import", "plan", "language", "demo", "help", "paysupport", "cancel");
 
     /** Publishes the command menu in every language and learns who we are – after startup, so a slow Telegram never delays it. */
@@ -286,6 +288,28 @@ public class BotApi {
         } catch (Exception e) {
             log.debug("getChatMemberCount failed: {}", e.getMessage());
             return Optional.empty();
+        }
+    }
+
+    /** A new invite link for the channel with this name (up to 32 characters); empty when the bot may not invite people. */
+    public Optional<String> createInviteLink(long chatId, String name) {
+        try {
+            var link = client().execute(CreateChatInviteLink.builder().chatId(String.valueOf(chatId)).name(name).build());
+            return Optional.ofNullable(link.getInviteLink());
+        } catch (Exception e) {
+            log.debug("createChatInviteLink failed: {}", e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /** Stops an invite link from working. */
+    public boolean revokeInviteLink(long chatId, String url) {
+        try {
+            client().execute(RevokeChatInviteLink.builder().chatId(String.valueOf(chatId)).inviteLink(url).build());
+            return true;
+        } catch (Exception e) {
+            log.debug("revokeChatInviteLink failed: {}", e.getMessage());
+            return false;
         }
     }
 

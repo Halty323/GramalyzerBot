@@ -9,6 +9,7 @@ public final class UserState {
     public static final String AWAIT_TOPIC = "AWAIT_TOPIC";
     public static final String AWAIT_BAN = "AWAIT_BAN";
     public static final String AWAIT_TRACK = "AWAIT_TRACK";
+    public static final String AWAIT_PROMO = "AWAIT_PROMO";
 
     private UserState() {}
 }
