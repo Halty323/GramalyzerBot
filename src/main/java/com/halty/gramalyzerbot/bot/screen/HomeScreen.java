@@ -93,6 +93,7 @@ public class HomeScreen {
         v.row(Btn.cb(Tr.t("btn.times"), Cb.of("nav:times", id, ch.getWindowDays(), "main")),
                 Btn.cb(Tr.t("btn.content"), Cb.of("nav:content", id, ch.getWindowDays(), "main")));
         v.row(Btn.cb(Tr.t("btn.top"), Cb.of("nav:top", id, 0)), Btn.cb(Tr.t("btn.growth"), Cb.of("nav:growth", id, 30)));
+        v.row(Btn.cb(Tr.t("btn.speed"), Cb.of("vs:list", id)));
         if (role.can(Permission.CHANGE_SETTINGS)) {
             v.row(Btn.cb(Tr.t("btn.settings"), Cb.of("set:home", id)), Btn.cb(Tr.t("btn.team"), Cb.of("team:home", id)));
         } else {

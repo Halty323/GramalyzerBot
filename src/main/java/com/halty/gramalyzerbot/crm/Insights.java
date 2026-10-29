@@ -142,7 +142,7 @@ public record Insights(
     }
 
     /** The next time {@code day} at {@code hour:00} (channel time) that is at least ten minutes away. */
-    static Instant nextOccurrence(DayOfWeek day, int hour, ZoneId zone, Instant now) {
+    public static Instant nextOccurrence(DayOfWeek day, int hour, ZoneId zone, Instant now) {
         Instant earliest = now.plus(Duration.ofMinutes(10));
         ZonedDateTime t = now.atZone(zone).with(TemporalAdjusters.nextOrSame(day))
                 .withHour(hour).withMinute(0).withSecond(0).withNano(0);

@@ -114,6 +114,7 @@ All under `/api`, with the same auth as before (session cookie from `POST /api/l
 | **GET** | **`/api/channels/{id}/cross-promo`** | **new:** the channel's cross-promo profile, partners that fit and swaps with what each side's post brought (`CrossPromo`) |
 | **PUT** | **`/api/channels/{id}/cross-promo/profile`** | **new:** `{"topic": "TECH", "language": "en", "pitch": "…", "enabled": true}` |
 | **POST** | **`/api/channels/{id}/cross-promo/swaps`** | **new:** `{"partner": 42}` asks a matched channel to swap posts |
+| **GET** | **`/api/channels/{id}/views`** | **new:** view speed: the channel's usual views 1, 6 and 24 hours after posting, and each recent post against it (`ViewSpeed`) |
 | **POST** | **`/api/channels/{id}/cross-promo/swaps/{swapId}/{accept,decline,cancel,end}`** | **new:** answer, take back or end a swap; accepting makes a promo link in both channels |
 | **POST** | **`/api/media?name=`** | **new:** upload a picture, GIF or video for a queued post (raw body with its `Content-Type`; 10 MB for pictures, 50 MB otherwise). Returns `{id, kind, name}` for the post's `media` list. Unused uploads are removed after a day. |
 | GET | `/api/media/{id}` | an uploaded file |
@@ -142,6 +143,15 @@ An admin bot hears about every subscriber who joins or leaves an own channel (th
 * **Promo links.** `/promo` (or 🔗 on the Growth screen) makes a named invite link per ad or shoutout, e.g. `Shoutout in @techdaily 20$`. Telegram reports the link with each join, so the bot counts who joined through it, who stayed and the cost per subscriber who stayed.
 * **Leave waves.** When at least 5 people (and 0.5% of the channel) leave within an hour and far more leave than join, team members with nudges on get one alert, at most every 12 hours.
 * Telegram sends nothing from before the bot asked for these updates, so counting starts on deploy. Sample channels get a month of generated joins, leaves and three promo links.
+
+## View speed
+
+For public channels the bot reads each post's views from the channel's public page (`views` package, every 10 minutes for posts under 25 hours old) and keeps them at 1, 6 and 24 hours. A reading counts for a mark only when it is close to it (within a quarter of the mark, at least 30 minutes), and is scaled to the exact hour.
+
+* **Usual pace.** The median of the channel's last 30 posts at each mark, once at least 5 posts have one.
+* **Alerts.** A new post under 60% of the usual pace at 1 or 6 hours ("lagging") or over 180% ("flying") sends one alert to team members with the digest on, with tips, the channel's next good slot and a 📌 Pin button (silent pin, needs the bot's pin right).
+* **Views metric.** "Views after 24 hours" can be picked as the success metric, so best-time advice ranks by views instead of reactions. Private channels have no public page, so they can't use it.
+* `/speed` (or ⚡ on the dashboard) and the website's Insights page show each post's three marks. Sample channels get generated views, with the newest post lagging.
 
 ## Cross-promo
 

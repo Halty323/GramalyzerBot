@@ -68,6 +68,26 @@ public class Post {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    /** Views as the public web preview last showed them; null for a private channel or before the first reading. */
+    private Integer views;
+
+    @Column(name = "views_checked_at")
+    private Instant viewsCheckedAt;
+
+    /** Views 1, 6 and 24 hours after posting, filled in once each mark has passed. */
+    @Column(name = "views_1h")
+    private Integer views1h;
+
+    @Column(name = "views_6h")
+    private Integer views6h;
+
+    @Column(name = "views_24h")
+    private Integer views24h;
+
+    /** The pace alert the post already got: LAG or FAST, at most one. */
+    @Column(name = "pace_alert")
+    private String paceAlert;
+
     @PrePersist
     void onCreate() {
         if (createdAt == null) createdAt = Instant.now();

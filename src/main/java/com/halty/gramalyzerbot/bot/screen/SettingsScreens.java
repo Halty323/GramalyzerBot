@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 import java.time.DayOfWeek;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /** Channel configuration, all driven by buttons (and one typed prompt for the timezone). */
@@ -85,9 +86,11 @@ public class SettingsScreens {
         long id = ch.getId();
         View v = new View().line(Tr.t("met.title")).blank()
                 .line(Tr.t("met.hint"));
-        for (Metric m : Metric.values())
+        List<Metric> metrics = Arrays.stream(Metric.values()).filter(m -> m != Metric.VIEWS || SettingsService.viewsKnown(ch)).toList();
+        for (Metric m : metrics)
             v.line("• <b>" + Labels.metric(m) + "</b> – " + Labels.formula(m));
-        for (Metric m : Metric.values())
+        if (!metrics.contains(Metric.VIEWS)) v.line("<i>" + Tr.t("met.views_private") + "</i>");
+        for (Metric m : metrics)
             v.row(Btn.cb((ch.getMetric() == m ? "✅ " : "") + Labels.metric(m), Cb.of("set:metset", id, m.name())));
         return v.row(Btn.cb(Tr.t("set.btn.back"), Cb.of("set:home", id)));
     }
