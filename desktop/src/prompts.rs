@@ -268,12 +268,19 @@ pub fn describe(ctx: &Context) -> String {
         }
     }
     if let Some(i) = ctx.insights.filter(|i| i.status == "ready") {
-        let _ = writeln!(s, "\nAnalytics (engagement lift vs. the channel's typical post, 1.0 = typical; timezone {}):", i.timezone);
-        let times: Vec<String> = i.best_times.iter().take(3).map(|t| format!("{} {:02}:00 ({:.1}×)", day_name(&t.day), t.hour, t.lift)).collect();
+        let _ = writeln!(s, "\nAnalytics (lift vs. the channel's posts around the same time, 1.0 = typical; 90% range in brackets; a range that includes 1.0 means \"can't tell yet\"; sponsored posts left out; timezone {}):", i.timezone);
+        let slot = |t: &InsightSlot| match (t.from, t.span) {
+            (Some(from), Some(span)) if span > 1 => format!("{:02}:00–{:02}:00", from, (from + span) % 24),
+            _ => format!("{:02}:00", t.hour),
+        };
+        let times: Vec<String> = i.best_times.iter().take(3).map(|t| format!("{} {} ({:.1}×)", day_name(&t.day), slot(t), t.lift)).collect();
         if !times.is_empty() {
             let _ = writeln!(s, "- Best times: {}", times.join(", "));
         }
-        let groups = |g: &[InsightGroup]| g.iter().take(5).map(|g| format!("{} {:.1}×", g.key, g.lift)).collect::<Vec<_>>().join(", ");
+        let groups = |g: &[InsightGroup]| g.iter().take(5).map(|g| match (g.low, g.high) {
+            (Some(low), Some(high)) => format!("{} {:.1}× ({:.1}–{:.1})", g.key, g.lift, low, high),
+            _ => format!("{} {:.1}×", g.key, g.lift),
+        }).collect::<Vec<_>>().join(", ");
         if !i.content.kinds.is_empty() {
             let _ = writeln!(s, "- Formats: {}", groups(&i.content.kinds));
         }
@@ -281,7 +288,7 @@ pub fn describe(ctx: &Context) -> String {
             let _ = writeln!(s, "- Length (SHORT ≤120 chars, MEDIUM 121–400, LONG 401–800, XLONG 800+): {}", groups(&i.content.lengths));
         }
         if !i.content.topics.is_empty() {
-            let _ = writeln!(s, "- Hashtags: {}", groups(&i.content.topics));
+            let _ = writeln!(s, "- Topics (by hashtag; the subject matters, adding a hashtag doesn't): {}", groups(&i.content.topics));
         }
         if !i.content.keywords.is_empty() {
             let _ = writeln!(s, "- Keywords: {}", groups(&i.content.keywords));
@@ -333,7 +340,7 @@ pub fn rewrite(ctx: &Context, kind: Rewrite, title: &str, body: &str, brief: &st
         Rewrite::Expand => format!("Expand this post with useful specifics, an example or a short list, staying under 1500 characters. {only}"),
         Rewrite::Hook => format!("Rewrite only the opening (first one or two lines) so it makes people stop scrolling, then keep the rest of the post as it is. {only}"),
         Rewrite::Grammar => format!("Fix spelling, grammar and punctuation only. Do not change wording or style otherwise. {only}"),
-        Rewrite::Hashtags => "Suggest 3 to 6 hashtags for this post that fit the channel (prefer the ones it already uses and the analytics show working). Answer with the hashtags on one line, separated by spaces, nothing else.".to_string(),
+        Rewrite::Hashtags => "Suggest 1 to 3 hashtags that label this post's subject, so readers can find similar posts in the channel. Prefer the ones it already uses; Telegram has no hashtag feed, so they don't bring new readers. Answer with the hashtags on one line, separated by spaces, nothing else.".to_string(),
         Rewrite::Headlines => "Suggest 5 short internal titles (under 70 characters) for this post, one per line, numbered. Nothing else.".to_string(),
         Rewrite::Translate => format!("Translate this post into {target}, keeping its tone, emoji and line breaks; adapt idioms naturally. {only}"),
         Rewrite::Tone => format!("Rewrite this post in a {tone} tone, keeping its facts and language. {only}"),
@@ -372,7 +379,7 @@ pub fn review(ctx: &Context) -> Vec<ChatMessage> {
     vec![
         system(ctx, "You explain analytics to busy channel owners."),
         ChatMessage::user(
-            "Review this channel's analytics. Give: 1) three findings in plain words, 2) what to post more and less of, 3) a posting rhythm for next week with days and times, 4) three post ideas that use what works. Keep it under 300 words. Use short numbered sections and plain text.".to_string(),
+            "Review this channel's analytics. Give: 1) three findings in plain words, only ones whose range is clearly above or below 1.0, and say when the data can't tell yet, 2) what to post more and less of, 3) a posting rhythm for next week with days and times (as tests to compare, not rules), 4) three post ideas that use what works. Don't recommend hashtags for reach or generic best times; Telegram shows posts to subscribers in order, so what matters is what this channel's readers respond to. Keep it under 300 words. Use short numbered sections and plain text.".to_string(),
         ),
     ]
 }
@@ -382,7 +389,7 @@ pub fn assistant(ctx: &Context, tracked: &[TrackedSummary], history: &[ChatMessa
     if !tracked.is_empty() {
         watch.push_str("Channels on the user's watchlist (competitors/inspiration):\n");
         for s in tracked.iter().take(10) {
-            let _ = writeln!(watch, "- {} @{}: {} subscribers, avg views {}, ER {}%, {} posts/day", s.title, s.username, opt(s.subscribers), opt_f(s.avg_views), opt_f(s.er), opt_f(s.posts_per_day));
+            let _ = writeln!(watch, "- {} @{}: {} subscribers, avg views {}, reach (views ÷ subscribers) {}%, {} posts/day", s.title, s.username, opt(s.subscribers), opt_f(s.avg_views), opt_f(s.err), opt_f(s.posts_per_day));
         }
     }
     let scheduled = ctx
@@ -403,7 +410,7 @@ pub fn assistant(ctx: &Context, tracked: &[TrackedSummary], history: &[ChatMessa
 pub fn teardown(ctx: &Context, title: &str, posts: &[FeedPost], stats: Option<&TrackedStats>) -> Vec<ChatMessage> {
     let mut s = format!("Channel to analyse: {title}\n");
     if let Some(st) = stats {
-        let _ = writeln!(s, "Subscribers {}, avg views {}, ER {}%, posts/day {}", opt(st.subscribers), opt_f(st.avg_views), opt_f(st.er), opt_f(st.posts_per_day));
+        let _ = writeln!(s, "Subscribers {}, avg views {}, reach (views ÷ subscribers) {}%, posts/day {}", opt(st.subscribers), opt_f(st.avg_views), opt_f(st.err), opt_f(st.posts_per_day));
     }
     let _ = writeln!(s, "Recent posts (format, views, reactions):");
     for p in posts.iter().take(20) {
@@ -422,11 +429,11 @@ pub fn teardown(ctx: &Context, title: &str, posts: &[FeedPost], stats: Option<&T
 pub fn compare(ctx: &Context, tracked: &[TrackedSummary]) -> Vec<ChatMessage> {
     let mut s = String::from("Watchlist:\n");
     for t in tracked.iter().take(15) {
-        let _ = writeln!(s, "- {} @{}: {} subscribers, 7-day change {}, avg views {}, ER {}%, {} posts/day", t.title, t.username, opt(t.subscribers), opt(t.change7), opt_f(t.avg_views), opt_f(t.er), opt_f(t.posts_per_day));
+        let _ = writeln!(s, "- {} @{}: {} subscribers, 7-day change {}, avg views {}, reach (views ÷ subscribers) {}%, {} posts/day", t.title, t.username, opt(t.subscribers), opt(t.change7), opt_f(t.avg_views), opt_f(t.err), opt_f(t.posts_per_day));
     }
     vec![
         system(ctx, "You compare Telegram channels."),
-        ChatMessage::user(format!("{s}\nCompare these channels with mine: who is growing and why it might be, which engagement levels are realistic for my size, and 3 moves for me this month. Under 250 words, plain text.")),
+        ChatMessage::user(format!("{s}\nCompare these channels with mine: who is growing and what might explain it (say it's a guess: these numbers can't show causes), what reach is realistic for my size (reach usually falls as channels grow), and 3 moves for me this month. Under 250 words, plain text.")),
     ]
 }
 

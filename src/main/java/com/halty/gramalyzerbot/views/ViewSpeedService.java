@@ -217,7 +217,7 @@ public class ViewSpeedService {
 
     // ------------------------------------------------------------------ demo
 
-    /** Gives a sample channel's posts views at each mark the first time it's looked at, the newest one lagging. */
+    /** Gives a sample channel's posts views at each mark the first time it's looked at, the newest one past its first hour lagging. */
     private void ensureDemo(Channel ch) {
         List<Post> all = posts.findTop40ByChannelIdOrderByPostedAtDesc(ch.getId());
         if (all.isEmpty() || all.stream().anyMatch(p -> p.getViews() != null)) return;
@@ -225,10 +225,13 @@ public class ViewSpeedService {
         Random rng = new Random(ch.getTelegramChatId());
         int subs = ch.getSubscribers() == null ? 5_000 : ch.getSubscribers();
         List<Post> rows = new ArrayList<>();
+        // the newest post may be minutes old, with nothing to judge yet: the lagging one is the newest past its first hour
+        int lagging = 0;
+        while (lagging < all.size() - 1 && Duration.between(all.get(lagging).getPostedAt(), now).toMinutes() < 60) lagging++;
         for (int i = 0; i < all.size(); i++) {
             Post p = all.get(i);
             double day = subs * (0.22 + p.getReactions() / (double) Math.max(1, subs) * 6) * (0.8 + rng.nextDouble() * 0.4);
-            if (i == 0) day *= 0.4; // the newest post is falling behind
+            if (i == lagging) day *= 0.4;
             long ageMin = Duration.between(p.getPostedAt(), now).toMinutes();
             int h1 = (int) (day * 0.34), h6 = (int) (day * 0.72), h24 = (int) day;
             if (ageMin >= 60) p.setViews1h(h1);
@@ -238,7 +241,7 @@ public class ViewSpeedService {
                     : ageMin >= 60 ? 0.34 + 0.38 * (ageMin - 60) / 300.0 : 0.34 * ageMin / 60.0;
             p.setViews((int) (day * share));
             p.setViewsCheckedAt(now);
-            if (i == 0 && ageMin >= 60) p.setPaceAlert("LAG");
+            if (i == lagging && ageMin >= 60) p.setPaceAlert("LAG");
             rows.add(p);
         }
         posts.saveAll(rows);

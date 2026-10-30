@@ -128,6 +128,11 @@ pub struct InsightSlot {
     pub lift: f64,
     #[serde(default)]
     pub support: i64,
+    /// The hours the slot covers: a 4-hour block on channels with fewer than 100 posts.
+    #[serde(default)]
+    pub from: Option<u32>,
+    #[serde(default)]
+    pub span: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -136,6 +141,11 @@ pub struct InsightGroup {
     pub key: String,
     pub posts: i64,
     pub lift: f64,
+    /// The 90% range of `lift`; servers before ranges send neither.
+    #[serde(default)]
+    pub low: Option<f64>,
+    #[serde(default)]
+    pub high: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -294,7 +304,9 @@ pub struct TrackedStats {
     #[serde(default)]
     pub series: Vec<SeriesPoint>,
     pub avg_views: Option<f64>,
-    pub er: Option<f64>,
+    /// Reach (TGStat's ERR): views ÷ subscribers in %. Older servers called it `er`.
+    #[serde(alias = "er")]
+    pub err: Option<f64>,
     pub avg_reactions: Option<f64>,
     pub reaction_rate: Option<f64>,
     pub posts_per_day: Option<f64>,
@@ -335,7 +347,9 @@ pub struct TrackedSummary {
     pub subscribers: Option<i64>,
     pub change7: Option<i64>,
     pub avg_views: Option<f64>,
-    pub er: Option<f64>,
+    /// Reach (views ÷ subscribers, in %); older servers called it `er`.
+    #[serde(alias = "er")]
+    pub err: Option<f64>,
     pub posts_per_day: Option<f64>,
     pub last_post: Option<String>,
     pub fetched_at: Option<String>,

@@ -14,7 +14,7 @@ const COLUMNS: [(Sort, &str, u16); 7] = [
     (Sort::Subscribers, "watch.col.subscribers", 110),
     (Sort::Change, "watch.col.change", 90),
     (Sort::Views, "watch.col.views", 90),
-    (Sort::Er, "watch.col.er", 70),
+    (Sort::Er, "watch.col.err", 70),
     (Sort::PerDay, "watch.col.per_day", 80),
     (Sort::Last, "watch.col.last", 100),
 ];
@@ -25,7 +25,7 @@ fn key(s: &TrackedSummary, col: Sort) -> Option<f64> {
         Sort::Subscribers => s.subscribers.map(|v| v as f64),
         Sort::Change => s.change7.map(|v| v as f64),
         Sort::Views => s.avg_views,
-        Sort::Er => s.er,
+        Sort::Er => s.err,
         Sort::PerDay => s.posts_per_day,
         Sort::Last => s.last_post.as_deref().and_then(local).map(|d| d.timestamp() as f64),
     }
@@ -76,7 +76,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
         let best = |f: fn(&TrackedSummary) -> Option<f64>| rows.iter().filter(|s| f(s).unwrap_or(0.0) > 0.0).max_by(|a, b| f(a).partial_cmp(&f(b)).unwrap_or(std::cmp::Ordering::Equal)).copied();
         let highlights: Vec<(Icon, &str, Option<&TrackedSummary>, String)> = vec![
             (Icon::Rocket, "watch.fastest", best(|s| s.change7.map(|v| v as f64)), String::new()),
-            (Icon::Flame, "watch.engaging", best(|s| s.er), String::new()),
+            (Icon::Flame, "watch.reach", best(|s| s.err), String::new()),
             (Icon::Zap, "watch.busiest", best(|s| s.posts_per_day), String::new()),
         ];
         let cards: Vec<Element<Message>> = highlights
@@ -85,7 +85,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
                 let s = s?;
                 let line = match label {
                     "watch.fastest" => i.tv("view.in_7_days", &[("change", &i.signed(s.change7.unwrap_or(0)))]),
-                    "watch.engaging" => format!("{} {}", app.t("watch.col.er"), i.percent(s.er.unwrap_or(0.0), 1)),
+                    "watch.reach" => format!("{} {}", app.t("watch.col.err"), i.percent(s.err.unwrap_or(0.0), 1)),
                     _ => i.tv("watch.per_day", &[("n", &i.dec(s.posts_per_day.unwrap_or(0.0), 1))]),
                 };
                 Some(
@@ -153,7 +153,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             container(num(s.subscribers.map(|v| i.num(v)))).width(110).into(),
             container(change).width(90).into(),
             container(num(s.avg_views.map(|v| i.compact(v)))).width(90).into(),
-            container(num(s.er.map(|v| i.percent(v, 1)))).width(70).into(),
+            container(num(s.err.map(|v| i.percent(v, 1)))).width(70).into(),
             container(num(s.posts_per_day.map(|v| i.dec(v, 1)))).width(80).into(),
             container(small(s.last_post.as_deref().and_then(local).map(|d| i.ago(&d)).unwrap_or_else(|| app.t("watch.never")))).width(100).into(),
             container(canvas(Sparkline(s.series.clone())).width(80).height(26)).width(90).into(),
