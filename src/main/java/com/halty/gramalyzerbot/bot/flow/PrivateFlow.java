@@ -48,6 +48,7 @@ import java.util.regex.Pattern;
 public class PrivateFlow {
 
     private static final Duration PROMPT_TTL = Duration.ofMinutes(15);
+    private static final Duration DRAFT_TTL = Duration.ofMinutes(30);
     private static final long MAX_IMPORT_BYTES = 20L * 1024 * 1024;
     private static final Pattern HANDLE = Pattern.compile("^@?([A-Za-z][A-Za-z0-9_]{3,31})$");
 
@@ -66,6 +67,7 @@ public class PrivateFlow {
     private final CrossPromoScreens crossPromo;
     private final ViewSpeedScreens viewSpeed;
     private final GapScreens gapScreens;
+    private final PlannerScreens plannerScreens;
     private final SearchCheckScreens searchCheck;
     private final SwapService swaps;
     private final SettingsScreens settingsScreens;
@@ -187,6 +189,11 @@ public class PrivateFlow {
             case "speed", "views" -> withChannel(u, chat, (ch, role) -> gateway.send(chat, viewSpeed.list(ch, role)));
             case "gaps", "competitors" -> withChannel(u, chat, (ch, role) -> gateway.send(chat, gapScreens.list(ch, u)));
             case "seo", "search" -> withChannel(u, chat, (ch, role) -> gateway.send(chat, searchCheck.show(ch)));
+            case "score", "draft" -> withChannel(u, chat, (ch, role) -> {
+                users.setState(u, UserState.AWAIT_DRAFT, String.valueOf(ch.getId()), DRAFT_TTL);
+                gateway.send(chat, plannerScreens.prompt(ch));
+            });
+            case "evergreen", "repost" -> withChannel(u, chat, (ch, role) -> gateway.send(chat, plannerScreens.evergreen(ch, role)));
             case "swap", "swaps", "crosspromo" -> withChannel(u, chat, (ch, role) -> { users.clearState(u); gateway.send(chat, crossPromo.home(ch, role)); });
             case "team" -> withChannel(u, chat, (ch, role) -> gateway.send(chat, team.home(ch, u, role)));
             case "channels" -> gateway.send(chat, start.channels(channels.forUser(u), u.getActiveChannelId(), u.isBotAdmin()));
@@ -340,6 +347,7 @@ public class PrivateFlow {
             case UserState.AWAIT_TOPIC -> topicInput(u, chat, p.arg(), text);
             case UserState.AWAIT_PROMO -> promoInput(u, chat, Long.parseLong(p.arg()), text);
             case UserState.AWAIT_SWAP_PITCH -> pitchInput(u, chat, Long.parseLong(p.arg()), text);
+            case UserState.AWAIT_DRAFT -> draftInput(u, m, Long.parseLong(p.arg()), text);
             case UserState.AWAIT_BAN -> banInput(u, chat, text);
             case UserState.AWAIT_IMPORT -> gateway.send(chat, View.of(Tr.t("flow.send_file")));
             default -> {
@@ -374,6 +382,16 @@ public class PrivateFlow {
         audit.record(ch.getId(), u.getId(), "promo.create", "Made the promo link \"" + Fmt.trunc(l.getName(), 40) + "\"");
         users.clearState(u);
         gateway.send(chat, growthScreens.created(ch, l));
+    }
+
+    /**
+     * A draft to score, sent as it would be posted. The prompt stays open, so another version can follow; the parts of
+     * an album after the first (which carries the caption) are ignored.
+     */
+    private void draftInput(User u, Events.PrivateMessage m, long channelId, String text) {
+        if ("ALBUM".equals(m.kind()) && text.isEmpty()) return;
+        Channel ch = access.require(u, channelId, Permission.VIEW);
+        gateway.send(m.chatId(), plannerScreens.score(ch, text, m.kind()));
     }
 
     /** One or two lines that partners see before saying yes to a swap; "-" removes it. */

@@ -39,14 +39,16 @@ public class WorkspaceService {
         List<LinkButton> buttons = input.buttons() != null ? checkedButtons(input.buttons()) : previous == null ? List.of() : previous.buttons();
         boolean silent = input.silent() != null ? input.silent() : previous != null && previous.silent();
         boolean pin = input.pin() != null ? input.pin() : previous != null && previous.pin();
+        List<Integer> repostOf = input.repostOf() != null ? input.repostOf() : previous == null ? List.of() : previous.repostOf();
         String body = input.body().trim();
-        if (body.isEmpty() && media.isEmpty()) throw new Problem(400,"Write a message or add a picture or video.");
+        if (!repostOf.isEmpty() && (!media.isEmpty() || !buttons.isEmpty())) throw new Problem(400,"A repost is sent exactly as it was posted, so it can't get new pictures or buttons.");
+        if (body.isEmpty() && media.isEmpty() && repostOf.isEmpty()) throw new Problem(400,"Write a message or add a picture or video.");
         int length = body.length() + (c.signature().isBlank() ? 0 : c.signature().length() + 2);
-        if (media.isEmpty() && length > 4096) throw new Problem(400,"Message and channel signature together must fit in 4096 characters.");
+        if (repostOf.isEmpty() && media.isEmpty() && length > 4096) throw new Problem(400,"Message and channel signature together must fit in 4096 characters.");
         if (!media.isEmpty() && length > 1024) throw new Problem(400,"With pictures or a video, Telegram allows captions of up to 1024 characters, signature included.");
         if (media.size() > 1 && !buttons.isEmpty()) throw new Problem(400,"Telegram can't put buttons under an album. Keep one picture or video, or remove the buttons.");
         if (media.size() > 1 && media.stream().anyMatch(m -> "animation".equals(m.kind()))) throw new Problem(400,"A GIF can't be part of an album. Post it on its own.");
-        Post p = new Post(id == null ? UUID.randomUUID().toString() : id, input.channelId(), input.title().trim(), body, input.status(), input.scheduledAt(), 0, 0, 0, input.category() == null ? "Community" : input.category(), "pending", null, null, media, buttons, silent, pin);
+        Post p = new Post(id == null ? UUID.randomUUID().toString() : id, input.channelId(), input.title().trim(), body, input.status(), input.scheduledAt(), 0, 0, 0, input.category() == null ? "Community" : input.category(), "pending", null, null, media, buttons, silent, pin, repostOf);
         return id == null ? store.insert(p) : store.update(p);
     }
     /** Uploaded files as stored (their kind and name come from the upload, not from what the client says). */

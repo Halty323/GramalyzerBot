@@ -48,8 +48,9 @@ public final class Events {
     /** A post forwarded from a channel (used to link a channel by forwarding one of its posts). */
     public record Forward(long chatId, int messageId, String title, String username) {}
 
+    /** @param kind what the message would be as a channel post: a {@link com.halty.gramalyzerbot.analytics.PostKind} name, ALBUM for part of one */
     public record PrivateMessage(long userId, String firstName, String username, String lang, long chatId,
-                                 int messageId, String text, DocumentInfo document, Forward forward) {}
+                                 int messageId, String text, DocumentInfo document, Forward forward, String kind) {}
 
     public record Callback(String id, long userId, String firstName, String username, String lang, long chatId,
                            int messageId, String data) {}

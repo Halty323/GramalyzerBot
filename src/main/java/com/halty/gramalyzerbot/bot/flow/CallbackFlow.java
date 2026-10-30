@@ -31,6 +31,9 @@ import org.springframework.stereotype.Component;
 import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.ZoneId;
+import com.halty.gramalyzerbot.planner.PlannerService;
+import com.halty.gramalyzerbot.workspace.Models;
+import com.halty.gramalyzerbot.workspace.WorkspaceService;
 import java.util.Optional;
 
 /**
@@ -62,6 +65,8 @@ public class CallbackFlow {
     private final CrossPromoScreens crossPromo;
     private final ViewSpeedScreens viewSpeed;
     private final GapScreens gapScreens;
+    private final PlannerScreens plannerScreens;
+    private final PlannerService planner;
     private final SearchCheckScreens searchCheck;
     private final SwapService swaps;
     private final SettingsScreens settingsScreens;
@@ -125,6 +130,7 @@ public class CallbackFlow {
                 show(c, gapScreens.list(access.require(u, a.getLong(2), Permission.VIEW), u));
                 yield Toast.NONE;
             }
+            case "ev" -> evergreen(u, c, a);
             case "seo" -> {
                 show(c, searchCheck.show(access.require(u, a.getLong(2), Permission.VIEW)));
                 yield Toast.NONE;
@@ -206,6 +212,37 @@ public class CallbackFlow {
                 return Toast.of(Tr.t("toast.pinned"));
             }
             default -> throw new IllegalArgumentException("unknown vs " + action);
+        }
+        return Toast.NONE;
+    }
+
+    // ------------------------------------------------------------------ evergreen reposts
+
+    private Toast evergreen(User u, Events.Callback c, Cb.Args a) {
+        String action = a.get(1);
+        Channel ch = access.require(u, a.getLong(2), action.equals("rp") ? Permission.MODERATE_POSTS : Permission.VIEW);
+        Role role = access.roleOf(u, ch);
+        switch (action) {
+            case "list" -> show(c, plannerScreens.evergreen(ch, role));
+            case "score" -> {
+                users.setState(u, UserState.AWAIT_DRAFT, String.valueOf(ch.getId()), Duration.ofMinutes(30));
+                show(c, plannerScreens.prompt(ch));
+            }
+            case "rp" -> {
+                if (ch.isDemo()) return new Toast(Tr.t("ever.demo"), true);
+                Optional<String> crm = planner.crmId(ch);
+                if (crm.isEmpty()) return new Toast(Tr.t("ever.no_queue"), true);
+                Models.Post p;
+                try {
+                    p = planner.repost(ch, crm.get(), a.getInt(3));
+                } catch (WorkspaceService.Problem e) {
+                    return new Toast(Tr.t(e.status == 409 && e.getMessage().startsWith("No free") ? "ever.no_slot" : "ever.gone"), true);
+                }
+                audit.record(ch.getId(), u.getId(), "post.repost", "Queued an evergreen repost");
+                show(c, plannerScreens.evergreen(ch, role));
+                return Toast.of(Tr.t("ever.queued", InsightScreens.when(p.scheduledAt().atZone(ch.zone()))));
+            }
+            default -> throw new IllegalArgumentException("unknown ev " + action);
         }
         return Toast.NONE;
     }

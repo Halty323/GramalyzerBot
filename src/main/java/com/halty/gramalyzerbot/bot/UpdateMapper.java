@@ -87,8 +87,10 @@ public class UpdateMapper {
                 var c = oc.getChat();
                 fwd = new Events.Forward(c.getId(), oc.getMessageId(), c.getTitle(), c.getUserName());
             }
+            String kind = m.getMediaGroupId() != null ? "ALBUM" : m.hasPhoto() ? "PHOTO" : m.hasVideo() ? "VIDEO"
+                    : m.hasAnimation() ? "ANIMATION" : m.hasDocument() ? "DOCUMENT" : m.hasPoll() ? "POLL" : "TEXT";
             return new Events.PrivateMessage(from.getId(), from.getFirstName(), from.getUserName(), from.getLanguageCode(),
-                    m.getChatId(), m.getMessageId(), text, doc, fwd);
+                    m.getChatId(), m.getMessageId(), text, doc, fwd, kind);
         }
         if ("group".equals(type) || "supergroup".equals(type)) {
             Long originChat = null;
