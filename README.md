@@ -117,6 +117,11 @@ All under `/api`, with the same auth as before (session cookie from `POST /api/l
 | **GET** | **`/api/channels/{id}/views`** | **new:** view speed: the channel's usual views 1, 6 and 24 hours after posting, and each recent post against it (`ViewSpeed`) |
 | **GET** | **`/api/channels/{id}/gaps`** | **new:** competitor gaps: formats, hours, lengths and topics that win for the watchlist and not for this channel, and where it's ahead (`CompetitorGaps`) |
 | **GET** | **`/api/channels/{id}/search-check`** | **new:** how findable the channel is in Telegram search: a score out of 100, checks, the words its posts are about, title and username ideas (`SearchCheck`) |
+| **POST** | **`/api/channels/{id}/draft-score`** | **new:** `{"body": "…", "media": ["photo"], "buttons": 0, "scheduledAt": "…", "postId": null}` rates a draft against what worked on the channel and returns the next 3 free good times (`DraftScore`) |
+| **GET** | **`/api/channels/{id}/best-slots?count=5`** | **new:** the next free good times for the queue |
+| **POST** | **`/api/channels/{id}/fill-slots`** | **new:** `{"postIds": null, "apply": false}` spreads the channel's drafts over the next free good times; `apply: false` only previews |
+| **GET** | **`/api/channels/{id}/evergreen`** | **new:** the channel's best posts from 3+ months ago (`Evergreen`) |
+| **POST** | **`/api/channels/{id}/evergreen/{messageId}`** | **new:** queues a silent repost of that post (an album with all its parts) at the next free good time; 409 when there's none or it's already queued |
 | **POST** | **`/api/channels/{id}/cross-promo/swaps/{swapId}/{accept,decline,cancel,end}`** | **new:** answer, take back or end a swap; accepting makes a promo link in both channels |
 | **POST** | **`/api/media?name=`** | **new:** upload a picture, GIF or video for a queued post (raw body with its `Content-Type`; 10 MB for pictures, 50 MB otherwise). Returns `{id, kind, name}` for the post's `media` list. Unused uploads are removed after a day. |
 | GET | `/api/media/{id}` | an uploaded file |
@@ -169,6 +174,14 @@ For public channels the bot reads each post's views from the channel's public pa
 `/seo` (or 🔎 on the dashboard, or Insights) scores how findable a channel is in Telegram search out of 100 (`seo` package). Telegram matches the title and username, so those carry most of the points: public at all (15), title length (10), title or username has the channel's main word (25), no emoji or symbol clutter (10), a readable username (10) that matches the title or topic (10), a description (10) that uses the channel's words (10).
 
 Nobody outside Telegram knows search counts, so the channel's words come from its own posts: words in at least 3 posts and hashtags in 2, minus signatures and words every channel uses. It suggests titles with the main word added and Latin usernames made of the title and topic words; the website's "Rewrite with AI" drafts names and a description. The description is read with `getChat` and kept for an hour.
+
+## Draft score and best times
+
+`/score` (or 📝 on the dashboard, or the website's post editor) rates a draft before it goes out (`planner` package). The draft is compared with the channel's analysis on six things, each as a lift (1.0× = a typical post): format, length, link, time slot, hashtags and words. They combine into an expected lift, weighted (format 1, length 0.7, link, hashtags and words 0.5, time 0.5 because one weekday/hour cell rests on few posts, each factor capped at 0.5–2×), and a score out of 100 (50 = typical, 100 = twice that). A factor is flagged when the channel's best option beats it by 0.15× or more, and "could reach" is the expected lift with every flagged factor fixed. It needs 10 posts with reactions. In the bot, send the draft as you'd post it (a picture or video with its caption works too); on the website the score updates as you type, "Use best time" moves the post to the best free slot and "Fix with AI" rewrites the text for the flagged length, link and hashtags with the user's own AI provider.
+
+**Free good times** are the analysis's best weekday/hour cells over the next two weeks, later days counting slightly less, keeping 3 hours from anything queued and no more posts a day than the channel usually publishes (1–3). Channels without enough posts get 9:00, 13:00 and 18:00. The website's Schedule page can spread all drafts over them in one go, the best slot to the oldest draft, after a preview.
+
+**Evergreen reposts** (`/evergreen`, 🔁 on the dashboard, or Schedule on the website) list the channel's posts from 3+ months ago that did 1.3× or more of its median, up to six, best first. A repost is queued silently at the next free good time and sent with `copyMessage` (or `copyMessages` for an album), so pictures and buttons come along without "forwarded from" and without the signature. A post reposted in the last three months isn't offered again; polls are never offered. Sample channels in the bot can't repost.
 
 ## Cross-promo
 

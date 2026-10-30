@@ -33,7 +33,9 @@ public final class DraftScore {
     static final int MIN_POSTS = 10;
     /** A factor is worth fixing when the channel's best option beats it by this much. */
     static final double BETTER = 0.15;
-    private static final Map<Dimension, Double> WEIGHT = Map.of(Dimension.FORMAT, 1.0, Dimension.TIME, 1.0, Dimension.LENGTH, 0.7,
+    /** One weekday/hour cell rests on few posts, so time counts half and no single factor moves the result past these. */
+    private static final double LOWEST = 0.5, HIGHEST = 2;
+    private static final Map<Dimension, Double> WEIGHT = Map.of(Dimension.FORMAT, 1.0, Dimension.TIME, 0.5, Dimension.LENGTH, 0.7,
             Dimension.LINK, 0.5, Dimension.HASHTAGS, 0.5, Dimension.KEYWORDS, 0.5);
 
     private DraftScore() {}
@@ -98,7 +100,7 @@ public final class DraftScore {
         double log = 0;
         for (Factor f : factors) {
             double lift = fixed && f.weak() ? f.bestLift() : f.lift();
-            log += WEIGHT.get(f.dimension()) * Math.log(Math.max(0.2, lift));
+            log += WEIGHT.get(f.dimension()) * Math.log(Math.max(LOWEST, Math.min(HIGHEST, lift)));
         }
         return Math.max(0.3, Math.min(3, Math.exp(log)));
     }

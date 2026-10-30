@@ -224,6 +224,10 @@ public class CallbackFlow {
         Role role = access.roleOf(u, ch);
         switch (action) {
             case "list" -> show(c, plannerScreens.evergreen(ch, role));
+            case "score" -> {
+                users.setState(u, UserState.AWAIT_DRAFT, String.valueOf(ch.getId()), Duration.ofMinutes(30));
+                show(c, plannerScreens.prompt(ch));
+            }
             case "rp" -> {
                 if (ch.isDemo()) return new Toast(Tr.t("ever.demo"), true);
                 Optional<String> crm = planner.crmId(ch);
