@@ -8,7 +8,10 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
-/** Turns a {@link Report} into the few plain-language recommendations shown on the dashboard. */
+/**
+ * Turns a {@link Report} into the few plain-language recommendations shown on the dashboard. A group is only
+ * recommended (or advised against) when its 90% range lies clearly on one side of "typical".
+ */
 public final class Playbook {
 
     private static final double WIN = 1.1, LOSE = 0.8;
@@ -25,12 +28,12 @@ public final class Playbook {
             for (int i = 0; i < n; i++) {
                 Report.Slot s = r.topSlots().get(i);
                 if (i > 0) sb.append(" · ");
-                sb.append(Fmt.dayShort(s.day())).append(' ').append(Fmt.hour(s.hour()));
+                sb.append(s.span() > 1 ? Labels.slot(s) : Fmt.dayShort(s.day()) + " " + Fmt.hour(s.hour()));
             }
             out.add(sb.toString());
         }
         best(r.kinds()).ifPresent(g -> out.add(Tr.t("playbook.format") + " " + Labels.kind(g.key()) + " (" + Fmt.lift(g.lift()) + ")"));
-        List<Group> winners = r.topics().stream().filter(g -> g.lift() >= WIN).limit(2).toList();
+        List<Group> winners = r.topics().stream().filter(g -> g.lift() >= WIN && g.low() > 1).limit(2).toList();
         if (!winners.isEmpty()) {
             StringBuilder sb = new StringBuilder(Tr.t("playbook.topics")).append(' ');
             for (int i = 0; i < winners.size(); i++) {
@@ -40,12 +43,12 @@ public final class Playbook {
             out.add(sb.toString());
         }
         best(r.lengths()).ifPresent(g -> out.add(Tr.t("playbook.length") + " " + Labels.length(g.key()) + " (" + Fmt.lift(g.lift()) + ")"));
-        r.topics().stream().filter(g -> g.lift() <= LOSE).min(Comparator.comparingDouble(Group::lift))
+        r.topics().stream().filter(g -> g.lift() <= LOSE && g.high() < 1).min(Comparator.comparingDouble(Group::lift))
                 .ifPresent(g -> out.add(Tr.t("playbook.easier") + " " + Labels.topic(g.key()) + " (" + Fmt.lift(g.lift()) + ")"));
         return out;
     }
 
     private static java.util.Optional<Group> best(List<Group> groups) {
-        return groups.stream().filter(g -> g.lift() >= WIN).max(Comparator.comparingDouble(Group::lift));
+        return groups.stream().filter(g -> g.lift() >= WIN && g.low() > 1).max(Comparator.comparingDouble(Group::lift));
     }
 }

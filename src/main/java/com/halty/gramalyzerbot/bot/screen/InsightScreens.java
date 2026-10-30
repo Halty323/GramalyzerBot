@@ -95,7 +95,7 @@ public class InsightScreens {
         for (java.time.DayOfWeek d : java.time.DayOfWeek.values()) {
             List<Slot> best = r.bestPerDay().getOrDefault(d, List.of());
             String slots = best.isEmpty() ? Tr.t("times.no_winner")
-                    : String.join(" · ", best.stream().map(s -> "<b>" + Fmt.hour(s.hour()) + "</b> (" + Fmt.lift(s.lift()) + ")").toList());
+                    : String.join(" · ", best.stream().map(s -> "<b>" + (s.span() > 1 ? Labels.window(s) : Fmt.hour(s.hour())) + "</b> (" + Fmt.lift(s.lift()) + ")").toList());
             v.line(Fmt.dayLong(d) + ": " + slots);
         }
         if (!r.experiments().isEmpty()) {
@@ -118,7 +118,7 @@ public class InsightScreens {
 
     // ------------------------------------------------------------------ what to write
 
-    private record Item(String label, double lift, int posts) {}
+    private record Item(String label, double lift, int posts, boolean clear) {}
 
     public View content(Channel ch, int win, String mode) {
         View paused = paused(ch);
@@ -133,7 +133,7 @@ public class InsightScreens {
             case "topics" -> topicsBody(v, r);
             default -> contentMain(v, r);
         }
-        v.blank().line("<i>" + Labels.confidence(r.confidence()) + " · " + Tr.n("n.posts", r.eligible()) + " · " + Tr.t("content.engagement_is", Labels.formula(ch.getMetric())) + "</i>");
+        v.blank().line("<i>" + Labels.confidence(r.confidence()) + " · " + Tr.n("n.posts", r.eligible()) + " · " + Tr.t("content.engagement_is", Labels.formula(r.metric())) + "</i>");
 
         long id = ch.getId();
         List<Btn> modes = new ArrayList<>();
@@ -146,20 +146,20 @@ public class InsightScreens {
 
     private void contentMain(View v, Report r) {
         List<Item> items = new ArrayList<>();
-        for (Group g : r.topics()) items.add(new Item(Labels.topic(g.key()), g.lift(), g.posts()));
-        for (Group g : r.kinds()) items.add(new Item(Tr.t("content.kind_posts", Labels.kind(g.key())), g.lift(), g.posts()));
-        for (Group g : r.lengths()) items.add(new Item(Tr.t("content.length_is", Labels.length(g.key())), g.lift(), g.posts()));
+        for (Group g : r.topics()) items.add(new Item(Labels.topic(g.key()), g.lift(), g.posts(), g.clear()));
+        for (Group g : r.kinds()) items.add(new Item(Tr.t("content.kind_posts", Labels.kind(g.key())), g.lift(), g.posts(), g.clear()));
+        for (Group g : r.lengths()) items.add(new Item(Tr.t("content.length_is", Labels.length(g.key())), g.lift(), g.posts(), g.clear()));
         items.sort(Comparator.comparingDouble(Item::lift).reversed());
         List<Item> words = new ArrayList<>();
-        for (Group g : r.keywords()) words.add(new Item("“" + Fmt.esc(g.key()) + "”", g.lift(), g.posts()));
+        for (Group g : r.keywords()) words.add(new Item("“" + Fmt.esc(g.key()) + "”", g.lift(), g.posts(), g.clear()));
 
         // keywords are noisier than topics/formats, so the summary only shows the strongest few
-        List<Item> up = new ArrayList<>(items.stream().filter(i -> i.lift() >= 1.1).toList());
-        up.addAll(words.stream().filter(i -> i.lift() >= 1.1).limit(3).toList());
+        List<Item> up = new ArrayList<>(items.stream().filter(i -> i.lift() >= 1.1 && i.clear()).toList());
+        up.addAll(words.stream().filter(i -> i.lift() >= 1.1 && i.clear()).limit(3).toList());
         up.sort(Comparator.comparingDouble(Item::lift).reversed());
         if (up.size() > 6) up = up.subList(0, 6);
-        List<Item> down = new ArrayList<>(items.stream().filter(i -> i.lift() <= 0.85).toList());
-        down.addAll(words.stream().filter(i -> i.lift() <= 0.85).sorted(Comparator.comparingDouble(Item::lift)).limit(2).toList());
+        List<Item> down = new ArrayList<>(items.stream().filter(i -> i.lift() <= 0.85 && i.clear()).toList());
+        down.addAll(words.stream().filter(i -> i.lift() <= 0.85 && i.clear()).sorted(Comparator.comparingDouble(Item::lift)).limit(2).toList());
         down.sort(Comparator.comparingDouble(Item::lift));
         if (down.size() > 4) down = down.subList(0, 4);
 
@@ -181,9 +181,9 @@ public class InsightScreens {
     /** A concrete recipe stitched from the strongest format, topic, length and slot: one line per ingredient. */
     static String idea(Report r) {
         List<String> parts = new ArrayList<>();
-        r.kinds().stream().filter(g -> g.lift() >= 1.1).findFirst().ifPresent(g -> parts.add(Tr.t("content.idea.format", Labels.kind(g.key()))));
-        r.topics().stream().filter(g -> g.lift() >= 1.1).findFirst().ifPresent(g -> parts.add(Tr.t("content.idea.topic", Labels.topic(g.key()))));
-        r.lengths().stream().filter(g -> g.lift() >= 1.1 && !g.key().equals("NONE")).findFirst().ifPresent(g -> parts.add(Tr.t("content.idea.length", Labels.length(g.key()))));
+        r.kinds().stream().filter(g -> g.lift() >= 1.1 && g.clear()).findFirst().ifPresent(g -> parts.add(Tr.t("content.idea.format", Labels.kind(g.key()))));
+        r.topics().stream().filter(g -> g.lift() >= 1.1 && g.clear()).findFirst().ifPresent(g -> parts.add(Tr.t("content.idea.topic", Labels.topic(g.key()))));
+        r.lengths().stream().filter(g -> g.lift() >= 1.1 && g.clear() && !g.key().equals("NONE")).findFirst().ifPresent(g -> parts.add(Tr.t("content.idea.length", Labels.length(g.key()))));
         if (parts.isEmpty()) return null;
         if (!r.topSlots().isEmpty()) parts.add(Tr.t("content.idea.when", Labels.slot(r.topSlots().get(0))));
         return String.join("\n", parts);
@@ -193,7 +193,12 @@ public class InsightScreens {
         boolean any = section(v, false, Tr.t("content.formats"), r.kinds(), Labels::kind);
         any |= section(v, any, Tr.t("content.lengths"), r.lengths(), Labels::length);
         any |= section(v, any, Tr.t("content.links"), r.links(), Labels::link);
-        any |= section(v, any, Tr.t("content.per_day"), r.frequency(), Labels::frequency);
+        if (!r.frequency().isEmpty()) {
+            if (any) v.blank();
+            v.line("<b>" + Tr.t("content.per_day") + "</b>");
+            for (Group g : r.frequency()) v.line("• " + Labels.frequency(g.key()) + " – " + Fmt.lift(g.lift()) + range(g) + " · " + Tr.n("n.days", g.posts()));
+            any = true;
+        }
         if (!any) v.line(Tr.t("content.no_variety"));
     }
 
@@ -228,8 +233,13 @@ public class InsightScreens {
         if (groups.isEmpty()) return false;
         if (blankBefore) v.blank();
         v.line("<b>" + title + "</b>");
-        for (Group g : groups) v.line("• " + label.apply(g.key()) + " – " + Fmt.lift(g.lift()) + " · " + Tr.n("n.posts", g.posts()));
+        for (Group g : groups) v.line("• " + label.apply(g.key()) + " – " + Fmt.lift(g.lift()) + range(g) + " · " + Tr.n("n.posts", g.posts()));
         return true;
+    }
+
+    /** The group's 90% range, e.g. " (0.9–1.6×)": a lift whose range spans 1.0 could just be noise. */
+    private static String range(Group g) {
+        return g.low() == g.high() ? "" : " <i>(" + String.format(java.util.Locale.US, "%.1f–%.1f×", g.low(), g.high()) + ")</i>";
     }
 
     // ------------------------------------------------------------------ top posts

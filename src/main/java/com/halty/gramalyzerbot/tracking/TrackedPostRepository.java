@@ -22,6 +22,11 @@ public interface TrackedPostRepository extends JpaRepository<TrackedPost, Long> 
 
     List<TrackedPost> findAllByTrackedChannelIdAndMessageIdBetween(Long channelId, Integer from, Integer to);
 
+    /** Posts since {@code after} that forward a channel (by its shown name) or mention its username or link; pass lower case. */
+    @Query("select p from TrackedPost p where p.postedAt > :after and (lower(p.forwardedFrom) = :title"
+            + " or lower(p.body) like concat('%@', :username, '%') or lower(p.body) like concat('%t.me/', :username, '%'))")
+    List<TrackedPost> findCiting(@Param("title") String title, @Param("username") String username, @Param("after") Instant after);
+
     @Modifying
     @Query("delete from TrackedPost p where p.trackedChannelId = :channelId")
     int deleteAllByChannel(@Param("channelId") Long channelId);

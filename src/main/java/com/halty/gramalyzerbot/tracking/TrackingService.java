@@ -373,6 +373,7 @@ public class TrackingService {
                 t.setKind(p.kind());
                 t.setBody(trunc(p.text(), 8192));
                 if (p.views() != null) t.setViews(p.views());
+                if (p.views() != null && t.getViews24h() == null && dayOld(p.postedAt(), now)) t.setViews24h(p.views());
                 t.setReactions(p.reactions());
                 t.setReactionBreakdown(p.reactionBreakdown());
                 t.setMediaUrl(trunc(p.mediaUrl(), 1024));
@@ -385,6 +386,12 @@ public class TrackingService {
             }
             posts.saveAll(batch);
         });
+    }
+
+    /** Whether a reading now catches a post at about a day old (24–48 hours), the age its views are compared at. */
+    static boolean dayOld(Instant postedAt, Instant now) {
+        Duration age = Duration.between(postedAt, now);
+        return age.compareTo(Duration.ofHours(24)) >= 0 && age.compareTo(Duration.ofHours(48)) < 0;
     }
 
     /** Today's row: subscribers and average views as of this refresh. */

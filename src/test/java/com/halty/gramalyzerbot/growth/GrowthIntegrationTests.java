@@ -34,6 +34,9 @@ class GrowthIntegrationTests {
     @Autowired PostRepository posts;
     @Autowired JdbcTemplate jdbc;
     @Autowired com.halty.gramalyzerbot.bot.screen.GrowthScreens screens;
+    @Autowired CitationService citations;
+    @Autowired com.halty.gramalyzerbot.tracking.TrackedChannelRepository trackedChannels;
+    @Autowired com.halty.gramalyzerbot.tracking.TrackedPostRepository trackedPosts;
     @MockitoBean BotApi bot;
 
     private static final long CHAT = -1001234567890L;
@@ -43,7 +46,7 @@ class GrowthIntegrationTests {
 
     @BeforeEach
     void reset() {
-        for (String table : new String[]{"member_events", "promo_links", "posts", "channels"}) jdbc.update("DELETE FROM " + table);
+        for (String table : new String[]{"member_events", "promo_links", "posts", "tracked_watchers", "tracked_posts", "tracked_snapshots", "tracked_channels", "channels"}) jdbc.update("DELETE FROM " + table);
         ch = channels.register(CHAT, "Pixel Pulse", "pixelpulse", 1000);
     }
 
@@ -128,6 +131,51 @@ class GrowthIntegrationTests {
         GrowthService.Report r = growth.report(ch, 30);
         assertEquals(4, r.joined());
         assertEquals(3, r.fromLinks());
+    }
+
+    @Test
+    void promoLinksShowWhoWasStillThereAWeekAndAMonthLater() {
+        when(bot.createInviteLink(eq(CHAT), anyString())).thenReturn(Optional.of("https://t.me/+bought"));
+        growth.create(ch, "Paid post in @bigchannel", 40.0, "$");
+        Instant longAgo = now.minus(Duration.ofDays(40));
+        for (int i = 0; i < 4; i++) join(10 + i, longAgo.plus(Duration.ofMinutes(i)), "https://t.me/+bought");
+        leave(10, longAgo.plus(Duration.ofDays(2)));   // gone within the week
+        leave(11, longAgo.plus(Duration.ofDays(20)));  // stayed a week, gone within the month
+        join(20, now.minus(Duration.ofDays(3)), "https://t.me/+bought"); // too recent to judge
+
+        GrowthService.LinkStat s = growth.linkStats(ch).getFirst();
+        assertEquals(5, s.joined());
+        assertEquals(0.75, s.kept7());
+        assertEquals(0.5, s.kept30());
+        assertEquals(40.0 / 3, s.costPerSubscriber(), 0.01);
+    }
+
+    @Test
+    void otherChannelsThatForwardOrMentionUsAreListed() {
+        var quoter = trackedChannels.save(new com.halty.gramalyzerbot.tracking.TrackedChannel("techdaily", "Tech Daily"));
+        var self = trackedChannels.save(new com.halty.gramalyzerbot.tracking.TrackedChannel("pixelpulse", "Pixel Pulse"));
+        tracked(quoter.getId(), 1, "Great thread, see @PixelPulse", null);
+        tracked(quoter.getId(), 2, "forwarded", "Pixel Pulse");
+        tracked(quoter.getId(), 3, "unrelated", null);
+        tracked(self.getId(), 4, "follow t.me/pixelpulse", null);
+
+        var list = citations.citations(ch);
+        assertEquals(1, list.size(), "the channel quoting itself doesn't count");
+        assertEquals("techdaily", list.getFirst().username());
+        assertEquals(1, list.getFirst().forwards());
+        assertEquals(1, list.getFirst().mentions());
+    }
+
+    private void tracked(long channel, int message, String body, String forwardedFrom) {
+        var p = new com.halty.gramalyzerbot.tracking.TrackedPost();
+        p.setTrackedChannelId(channel);
+        p.setMessageId(message);
+        p.setPostedAt(ago(60 * message));
+        p.setKind("TEXT");
+        p.setBody(body);
+        p.setForwardedFrom(forwardedFrom);
+        p.setUpdatedAt(now);
+        trackedPosts.save(p);
     }
 
     @Test

@@ -22,8 +22,10 @@ public class GrowthController {
     private final WorkspaceService workspace;
     private final InsightsService insights;
     private final GrowthService growth;
+    private final CitationService citations;
 
-    public GrowthController(WorkspaceService workspace, InsightsService insights, GrowthService growth) {
+    public GrowthController(WorkspaceService workspace, InsightsService insights, GrowthService growth, CitationService citations) {
+        this.citations = citations;
         this.workspace = workspace;
         this.insights = insights;
         this.growth = growth;
@@ -32,7 +34,8 @@ public class GrowthController {
     /** {@link GrowthService.Report} plus whether the bot is in the channel at all. */
     public record Growth(boolean connected, boolean tracking, Instant since, int days, int joined, int left, int net, int fromLinks,
                          List<GrowthService.Day> daily, List<GrowthService.PostEffect> gainers, List<GrowthService.PostEffect> losers,
-                         List<GrowthService.LinkStat> links) {}
+                         List<GrowthService.LinkStat> links, List<GrowthService.FormatEffect> formats,
+                         List<CitationService.Citation> citations) {}
 
     public record NewLink(String name, Double cost, String currency) {}
 
@@ -41,10 +44,10 @@ public class GrowthController {
         int d = Math.max(1, Math.min(days, 365));
         var crm = workspace.channel(id);
         var ch = insights.analyticsChannel(crm);
-        if (ch.isEmpty()) return new Growth(false, false, null, d, 0, 0, 0, 0, List.of(), List.of(), List.of(), List.of());
+        if (ch.isEmpty()) return new Growth(false, false, null, d, 0, 0, 0, 0, List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
         GrowthService.Report r = growth.report(ch.get(), d);
         return new Growth(true, r.tracking(), r.since(), r.days(), r.joined(), r.left(), r.net(), r.fromLinks(), r.daily(),
-                r.gainers(), r.losers(), r.links());
+                r.gainers(), r.losers(), r.links(), r.formats(), citations.citations(ch.get()));
     }
 
     @PostMapping("/promo-links")

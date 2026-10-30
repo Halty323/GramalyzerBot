@@ -61,10 +61,14 @@ public class WatchScreens {
             v.line(Tr.t("home.subscribers", Fmt.num(c.getSubscribers())) + delta);
         }
         if (s.avgViews() != null) {
-            String er = s.er() == null ? "" : " · " + Tr.t("watch.er", Fmt.one(s.er()) + "%");
+            String er = s.err() == null ? "" : " · " + Tr.t("24h".equals(s.errBasis()) ? "watch.err_24h" : "watch.err", Fmt.one(s.err()) + "%");
             v.line(Tr.t("watch.avg_views", Fmt.num(s.avgViews())) + er);
         }
-        if (s.reactionRate() != null) v.line(Tr.t("watch.reaction_rate", Fmt.one(s.reactionRate())));
+        if (s.reactionRate() != null) v.line(Tr.t("watch.reaction_rate", Fmt.one(s.reactionRate()) + "%"));
+        if (!s.flags().isEmpty()) {
+            v.line(Tr.t("watch.flags"));
+            for (String f : s.flags()) v.line("• " + Tr.t("watch.flag." + f));
+        }
         if (s.postsPerDay() != null)
             v.line(Tr.t("watch.per_day", Fmt.one(s.postsPerDay())) + (s.lastPost() == null ? "" : " · " + Tr.t("watch.last_post", Fmt.ago(s.lastPost(), now))));
         if (!s.kinds().isEmpty()) {

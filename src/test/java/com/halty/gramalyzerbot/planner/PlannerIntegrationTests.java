@@ -98,13 +98,16 @@ class PlannerIntegrationTests {
     }
 
     @Test
-    void aNewChannelIsStillLearningAndGetsCommonTimes() {
+    void aNewChannelIsStillLearningAndRotatesThroughTheDay() {
         post(1, 9, PostKind.TEXT, "Hello", 3);
         assertEquals("learning", planner.score(ch, new DraftScore.Draft("Hi", "TEXT", false, null)).status());
         List<PlannerService.Slot> slots = planner.free(ch, crm, null, 3);
         assertEquals(3, slots.size());
         assertTrue(slots.stream().allMatch(PlannerService.Slot::guess));
-        assertTrue(slots.stream().allMatch(s -> List.of(9, 13, 18).contains(s.at().atZone(ZoneOffset.UTC).getHour())));
+        assertTrue(slots.stream().allMatch(s -> List.of(9, 14, 19).contains(s.at().atZone(ZoneOffset.UTC).getHour())));
+        // no folklore "best hours": one a day, morning, afternoon and evening in turn, so the channel learns its own
+        assertEquals(3, slots.stream().map(s -> s.at().atZone(ZoneOffset.UTC).getHour()).distinct().count());
+        assertEquals(3, slots.stream().map(s -> s.at().atZone(ZoneOffset.UTC).toLocalDate()).distinct().count());
     }
 
     @Test

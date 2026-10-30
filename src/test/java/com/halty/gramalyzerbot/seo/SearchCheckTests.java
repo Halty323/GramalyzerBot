@@ -61,7 +61,7 @@ class SearchCheckTests {
         assertFalse(SearchCheck.decorated("Morning Markets ☕"));
 
         SearchCheck.Result r = SearchCheck.check("Printer Lab", "printerlab", "", List.of("one post"));
-        assertEquals("title_keyword_unknown", r.checks().get(2).id());
+        assertEquals("title_keyword_unknown", r.checks().stream().filter(c -> c.id().startsWith("title_keyword")).findFirst().orElseThrow().id());
         assertTrue(r.keywords().isEmpty());
     }
 }

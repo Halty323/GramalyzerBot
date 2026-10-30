@@ -6,26 +6,62 @@ import java.util.*;
 import java.util.regex.Pattern;
 
 /**
- * How findable a channel is in Telegram's search. Telegram matches what people type against a channel's title and
- * username, so those carry most of the score; the description is what convinces someone in the results to open it.
+ * How findable a channel is in Telegram's search, in two parts.
+ * <p>
+ * "Can people find it?" ({@code find}, 60 points): only public channels appear in search, and results match what
+ * people type against the title and username. "Will they join?" ({@code join}, 40 points): what a searcher sees
+ * before tapping, the description, a title that shows in full, a username that reads well. Telegram hasn't said
+ * whether search reads the description, so it is scored as persuasion, not findability.
+ * <p>
+ * What Telegram has confirmed about ranking (Pavel Durov, September 2023) can't be fixed by wording: channels rank by
+ * genuine subscribers, Premium subscribers count for more, and results favour the searcher's country. Since 2024 some
+ * channels are also hidden from search by moderation. Those are returned as {@code notes} rather than scored.
  * <p>
  * Nobody outside Telegram knows what people search for, so the words a channel should be found by are taken from its
- * own posts: the words and hashtags it keeps coming back to.
+ * own posts: the words and hashtags it keeps coming back to. Whether a change helps can only be seen by searching:
+ * owners can note their position for a word ({@code positions}) and compare over time.
  */
 public final class SearchCheck {
 
     public enum Status { OK, WARN, BAD }
 
-    /** @param id a {@code seo.check.<id>} translation key; @param words words the advice is about, if any */
-    public record Check(String id, Status status, int points, int max, List<String> words) {}
+    /**
+     * @param id    a {@code seo.<id>.<status>} translation key
+     * @param group "find" (can people find it) or "join" (will they open it)
+     * @param words words the advice is about, if any
+     */
+    public record Check(String id, String group, Status status, int points, int max, List<String> words) {
+        Check(String id, Status status, int points, int max, List<String> words) { this(id, group(id), status, points, max, words); }
+
+        private static String group(String id) {
+            return id.equals("public") || id.startsWith("title_keyword") || id.equals("title_clean") ? "find" : "join";
+        }
+    }
+
+    /** Where the channel was when its owner searched for {@code word}; {@code position} null = not in the results. */
+    public record Position(String word, Integer position, java.time.Instant checkedAt, Integer previous) {}
+
+    /** Facts about ranking that no wording changes, always shown with the score: {@code seo.note.<id>} keys. */
+    public static final List<String> NOTES = List.of("subscribers", "country", "moderation", "measure");
 
     /** @param inTitle whether the title (or username) already has it; @param posts how many posts use it */
     public record Keyword(String word, int posts, boolean inTitle, boolean inDescription) {}
 
-    /** @param grade good (80+), fair (50+) or poor */
-    public record Result(int score, String grade, List<Check> checks, List<Keyword> keywords, List<String> titleIdeas,
-                         List<String> usernameIdeas, String title, String username, String description, int postsRead) {}
+    /**
+     * @param grade     good (80+), fair (50+) or poor
+     * @param find      points of the "can people find it" checks, out of 60
+     * @param join      points of the "will they join" checks, out of 40
+     * @param positions the owner's latest search position per word, newest first
+     */
+    public record Result(int score, String grade, int find, int join, List<Check> checks, List<Keyword> keywords, List<String> titleIdeas,
+                         List<String> usernameIdeas, String title, String username, String description, int postsRead,
+                         List<String> notes, List<Position> positions) {
+        public Result withPositions(List<Position> p) {
+            return new Result(score, grade, find, join, checks, keywords, titleIdeas, usernameIdeas, title, username, description, postsRead, notes, p);
+        }
+    }
 
+    /** Not a Telegram rule: about what fits on one line of a phone's search results, where longer titles get cut. */
     static final int TITLE_SHOWN = 32;
     static final int DESCRIPTION_MAX = 255;
     static final int MIN_POSTS = 6;
@@ -43,57 +79,60 @@ public final class SearchCheck {
         List<String> words = keywords.stream().map(Keyword::word).toList();
         List<Check> checks = new ArrayList<>();
 
-        checks.add(username == null ? new Check("public", Status.BAD, 0, 15, List.of()) : new Check("public", Status.OK, 15, 15, List.of()));
-
-        int length = title.codePointCount(0, title.length());
-        checks.add(length >= 3 && length <= TITLE_SHOWN ? new Check("title_length", Status.OK, 10, 10, List.of())
-                : length > TITLE_SHOWN && length <= 64 ? new Check("title_length", Status.WARN, 5, 10, List.of())
-                : new Check("title_length", Status.BAD, 0, 10, List.of()));
+        // ---------- can people find it? ----------
+        checks.add(username == null ? new Check("public", Status.BAD, 0, 20, List.of()) : new Check("public", Status.OK, 20, 20, List.of()));
 
         if (posts.size() < MIN_POSTS || keywords.isEmpty()) {
-            checks.add(new Check("title_keyword_unknown", Status.WARN, 12, 25, List.of()));
+            checks.add(new Check("title_keyword_unknown", Status.WARN, 15, 30, List.of()));
         } else {
             List<String> top = words.subList(0, Math.min(3, words.size()));
             String haystack = title + " " + (username == null ? "" : username);
-            if (top.stream().anyMatch(w -> has(haystack, w))) checks.add(new Check("title_keyword", Status.OK, 25, 25, List.of()));
-            else if (words.stream().anyMatch(w -> has(haystack, w))) checks.add(new Check("title_keyword", Status.WARN, 15, 25, top));
-            else checks.add(new Check("title_keyword", Status.BAD, 0, 25, top));
+            if (top.stream().anyMatch(w -> has(haystack, w))) checks.add(new Check("title_keyword", Status.OK, 30, 30, List.of()));
+            else if (words.stream().anyMatch(w -> has(haystack, w))) checks.add(new Check("title_keyword", Status.WARN, 18, 30, top));
+            else checks.add(new Check("title_keyword", Status.BAD, 0, 30, top));
         }
 
         checks.add(decorated(title) ? new Check("title_clean", Status.WARN, 4, 10, List.of()) : new Check("title_clean", Status.OK, 10, 10, List.of()));
 
-        if (username == null) {
-            checks.add(new Check("username_readable", Status.BAD, 0, 10, List.of()));
-            checks.add(new Check("username_match", Status.BAD, 0, 10, List.of()));
-        } else {
-            boolean readable = username.length() <= 20 && username.chars().filter(c -> c == '_').count() <= 1 && !username.matches(".*\\d{2,}$");
-            checks.add(readable ? new Check("username_readable", Status.OK, 10, 10, List.of()) : new Check("username_readable", Status.WARN, 5, 10, List.of()));
-            String lower = username.toLowerCase(Locale.ROOT);
-            boolean match = latinWords(title).stream().anyMatch(lower::contains)
-                    || words.stream().filter(w -> LATIN.matcher(w).matches()).anyMatch(w -> lower.contains(TextFeatures.stem(w)));
-            checks.add(match ? new Check("username_match", Status.OK, 10, 10, List.of()) : new Check("username_match", Status.WARN, 5, 10, List.of()));
-        }
-
+        // ---------- will they join? ----------
         int d = description.codePointCount(0, description.length());
-        checks.add(d >= 50 ? new Check("description_present", Status.OK, 10, 10, List.of())
-                : d > 0 ? new Check("description_present", Status.WARN, 5, 10, List.of())
-                : new Check("description_present", Status.BAD, 0, 10, List.of()));
+        checks.add(d >= 50 ? new Check("description_present", Status.OK, 12, 12, List.of())
+                : d > 0 ? new Check("description_present", Status.WARN, 6, 12, List.of())
+                : new Check("description_present", Status.BAD, 0, 12, List.of()));
 
         if (!keywords.isEmpty()) {
             String desc = description;
             long found = words.stream().filter(w -> has(desc, w)).count();
             List<String> missing = words.stream().filter(w -> !has(desc, w)).limit(3).toList();
-            checks.add(found >= 2 ? new Check("description_keyword", Status.OK, 10, 10, List.of())
-                    : found == 1 ? new Check("description_keyword", Status.WARN, 5, 10, missing)
-                    : new Check("description_keyword", Status.BAD, 0, 10, missing));
+            checks.add(found >= 2 ? new Check("description_keyword", Status.OK, 8, 8, List.of())
+                    : found == 1 ? new Check("description_keyword", Status.WARN, 4, 8, missing)
+                    : new Check("description_keyword", Status.BAD, 0, 8, missing));
         } else {
-            checks.add(new Check("description_keyword_unknown", Status.WARN, 5, 10, List.of()));
+            checks.add(new Check("description_keyword_unknown", Status.WARN, 4, 8, List.of()));
+        }
+
+        int length = title.codePointCount(0, title.length());
+        checks.add(length >= 3 && length <= TITLE_SHOWN ? new Check("title_length", Status.OK, 8, 8, List.of())
+                : length > TITLE_SHOWN && length <= 64 ? new Check("title_length", Status.WARN, 4, 8, List.of())
+                : new Check("title_length", Status.BAD, 0, 8, List.of()));
+
+        if (username == null) {
+            checks.add(new Check("username_readable", Status.BAD, 0, 6, List.of()));
+            checks.add(new Check("username_match", Status.BAD, 0, 6, List.of()));
+        } else {
+            boolean readable = username.length() <= 20 && username.chars().filter(c -> c == '_').count() <= 1 && !username.matches(".*\\d{2,}$");
+            checks.add(readable ? new Check("username_readable", Status.OK, 6, 6, List.of()) : new Check("username_readable", Status.WARN, 3, 6, List.of()));
+            String lower = username.toLowerCase(Locale.ROOT);
+            boolean match = latinWords(title).stream().anyMatch(lower::contains)
+                    || words.stream().filter(w -> LATIN.matcher(w).matches()).anyMatch(w -> lower.contains(TextFeatures.stem(w)));
+            checks.add(match ? new Check("username_match", Status.OK, 6, 6, List.of()) : new Check("username_match", Status.WARN, 3, 6, List.of()));
         }
 
         int score = checks.stream().mapToInt(Check::points).sum();
+        int find = checks.stream().filter(c -> c.group().equals("find")).mapToInt(Check::points).sum();
         String grade = score >= 80 ? "good" : score >= 50 ? "fair" : "poor";
-        return new Result(score, grade, checks, keywords, titleIdeas(title, keywords, checks), usernameIdeas(title, username, keywords),
-                title, username, description, posts.size());
+        return new Result(score, grade, find, score - find, checks, keywords, titleIdeas(title, keywords, checks), usernameIdeas(title, username, keywords),
+                title, username, description, posts.size(), NOTES, List.of());
     }
 
     // ------------------------------------------------------------------ keywords

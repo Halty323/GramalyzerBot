@@ -17,7 +17,7 @@ public final class TrackingViews {
      * @param series daily subscriber counts while tracked, oldest first (at most 30)
      */
     public record Summary(String username, String title, String description, String photoUrl, boolean verified,
-                          Integer subscribers, Integer change7, Integer avgViews, Double er, Double postsPerDay,
+                          Integer subscribers, Integer change7, Integer avgViews, Double err, Double postsPerDay,
                           Instant lastPost, Instant fetchedAt, String error, boolean demo, boolean tracked,
                           List<Integer> series, String url) {}
 
@@ -29,7 +29,7 @@ public final class TrackingViews {
         List<Integer> series = s.series().stream().map(TrackedStats.Point::subscribers).filter(java.util.Objects::nonNull).toList();
         if (series.size() > 30) series = series.subList(series.size() - 30, series.size());
         return new Summary(c.getUsername(), c.getTitle(), c.getDescription(), c.getPhotoUrl(), c.isVerified(), c.getSubscribers(),
-                s.change7(), s.avgViews(), s.er(), s.postsPerDay(), s.lastPost(), c.getFetchedAt(), c.getLastError(), c.isDemo(), tracked,
+                s.change7(), s.avgViews(), s.err(), s.postsPerDay(), s.lastPost(), c.getFetchedAt(), c.getLastError(), c.isDemo(), tracked,
                 series, c.isDemo() ? null : "https://t.me/" + c.getUsername());
     }
 

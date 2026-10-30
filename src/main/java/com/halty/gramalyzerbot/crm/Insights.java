@@ -20,9 +20,9 @@ import java.util.List;
  * ({@code GET /api/channels/{id}/insights}; the TypeScript twin is {@code shared/types.ts → ChannelInsights}).
  * <p>
  * Weekdays are English upper-case names ("MONDAY"); {@link Heatmap} rows run Monday to Sunday. "Lift" is a
- * multiplier of the channel's typical engagement (1.0 = typical, 1.5 = half as much again).
- * Telegram does not give bots view counts, so engagement means reactions (plus comments when a discussion
- * group is linked) – see {@code metric}.
+ * multiplier of a typical post (1.0 = typical, 1.5 = half as much again), each post measured against the channel's
+ * posts around it; {@code low}–{@code high} is a 90% range. Success is views after 24 hours for public channels, or
+ * reactions (plus comments when a discussion group is linked) – see {@code metric}.
  */
 public record Insights(
         String channelId,
@@ -38,6 +38,8 @@ public record Insights(
         /** Machine-readable caveats: FEW_POSTS, NO_SIGNAL, LOW_TIME_VARIETY. */
         List<String> notes,
         Counts counts,
+        /** Whether the post model predicted the channel's newest posts (see {@code Backtest}). */
+        Check check,
         /** How many more usable posts are needed before times are shown; 0 once ready. */
         int postsNeeded,
         double avgReactions,
@@ -56,10 +58,14 @@ public record Insights(
         List<TopPost> topPosts,
         Audience audience) {
 
-    /** Posts in the analysis window, how many count, and why the rest were left out. */
-    public record Counts(int total, int eligible, int excluded, int immature) {}
+    /** Posts in the analysis window, how many count, and why the rest were left out ({@code ads} of {@code excluded} were sponsored). */
+    public record Counts(int total, int eligible, int excluded, int immature, int ads) {}
 
-    public record Slot(String day, int hour, double lift, int support) {}
+    /** @param status untested, proven or unproven; @param rho rank correlation on the {@code tested} newest posts */
+    public record Check(String status, Double rho, int tested) {}
+
+    /** @param from the first hour of the window the evidence covers, {@code span} hours wide (1, or 4 for young channels) */
+    public record Slot(String day, int hour, double lift, int support, int from, int span) {}
 
     public record Suggestion(Instant at, String day, int hour, double lift) {}
 
@@ -70,8 +76,12 @@ public record Insights(
     /** {@code lift[day][hour]} and {@code posts[day][hour]}, day 0 = Monday. */
     public record Heatmap(double[][] lift, int[][] posts) {}
 
-    /** Groups of posts sharing a trait. Keys: kinds = TEXT/PHOTO/VIDEO/…; lengths = NONE/SHORT/MEDIUM/LONG/XLONG; links = LINK/NOLINK; frequency = "1"/"2"/"3+" posts that day. */
-    public record Group(String key, int posts, double lift, double avgScore) {}
+    /**
+     * Groups of posts sharing a trait. Keys: kinds = TEXT/PHOTO/VIDEO/…; lengths = NONE/SHORT/MEDIUM/LONG/XLONG;
+     * links = LINK/NOLINK; frequency = days with "1"/"2"/"3+" posts, where {@code posts} counts days and lift is the
+     * day's total against a one-post day.
+     */
+    public record Group(String key, int posts, double lift, double avgScore, double low, double high) {}
 
     public record Content(List<Group> kinds, List<Group> lengths, List<Group> links, List<Group> topics,
                           List<Group> keywords, List<Group> frequency) {}
@@ -88,7 +98,7 @@ public record Insights(
 
     public static Insights notConnected(String channelId, String timezone) {
         return new Insights(channelId, "not_connected", Instant.now(), timezone, "ENGAGEMENT", "", 0, "LOW", List.of(),
-                new Counts(0, 0, 0, 0), AnalysisEngine.MIN_POSTS_FOR_TIMES, 0, 0, List.of(), List.of(), List.of(), List.of(), List.of(),
+                new Counts(0, 0, 0, 0, 0), new Check("untested", null, 0), AnalysisEngine.MIN_POSTS_FOR_TIMES, 0, 0, List.of(), List.of(), List.of(), List.of(), List.of(),
                 new Heatmap(new double[7][24], new int[7][24]),
                 new Content(List.of(), List.of(), List.of(), List.of(), List.of(), List.of()),
                 new Cadence(0, null, null, 0, null), List.of(), new Audience(null, null, 0, List.of()));
@@ -98,17 +108,18 @@ public record Insights(
         boolean ready = r.hasSignal() && r.eligible() >= AnalysisEngine.MIN_POSTS_FOR_TIMES;
         Audience audience = new Audience(growth.current(), growth.change(), growth.days(), growth.series());
         List<String> notes = r.notes().stream().map(Enum::name).toList();
-        Counts counts = new Counts(r.totalInWindow(), r.eligible(), r.excluded(), r.immature());
+        Counts counts = new Counts(r.totalInWindow(), r.eligible(), r.excluded(), r.immature(), r.ads());
+        Check check = new Check(r.check().status(), r.check().rho(), r.check().tested());
         int needed = Math.max(0, AnalysisEngine.MIN_POSTS_FOR_TIMES - r.eligible());
-        String metric = ch.getMetric().name();
-        String formula = ch.getMetric().formula();
+        String metric = r.metric().name();
+        String formula = r.metric().formula();
         ZoneId zone = ch.zone();
 
         Cadence cadence = new Cadence(round(r.cadence().postsPerWeek()), name(r.cadence().mostPostedDay()),
                 name(r.cadence().bestDay()), round(r.cadence().longestGapDays()), r.cadence().lastPost());
         if (!ready) {
             return new Insights(channelId, "learning", now, zone.getId(), metric, formula, ch.getWindowDays(),
-                    r.confidence().name(), notes, counts, needed, round(r.avgReactions()), round(r.avgComments()),
+                    r.confidence().name(), notes, counts, check, needed, round(r.avgReactions()), round(r.avgComments()),
                     List.of(), List.of(), List.of(), List.of(), List.of(),
                     new Heatmap(new double[7][24], new int[7][24]),
                     new Content(List.of(), List.of(), List.of(), List.of(), List.of(), List.of()),
@@ -131,7 +142,7 @@ public record Insights(
                 Links.post(ch.getTelegramChatId(), ch.getUsername(), ch.isDemo(), s.sample().messageId()))).toList();
 
         return new Insights(channelId, "ready", now, zone.getId(), metric, formula, ch.getWindowDays(),
-                r.confidence().name(), notes, counts, 0, round(r.avgReactions()), round(r.avgComments()),
+                r.confidence().name(), notes, counts, check, 0, round(r.avgReactions()), round(r.avgComments()),
                 best, r.experiments().stream().map(Insights::slot).toList(), suggestions,
                 r.days().stream().map(d -> new Day(d.day().name(), d.posts(), round(d.lift()))).toList(),
                 r.hours().stream().map(h -> new Hour(h.hour(), h.posts(), round(h.lift()))).toList(),
@@ -150,10 +161,10 @@ public record Insights(
         return t.toInstant();
     }
 
-    private static Slot slot(Report.Slot s) { return new Slot(s.day().name(), s.hour(), round(s.lift()), s.support()); }
+    private static Slot slot(Report.Slot s) { return new Slot(s.day().name(), s.hour(), round(s.lift()), s.support(), s.from(), s.span()); }
 
     private static List<Group> groups(List<Report.Group> in) {
-        return in.stream().map(g -> new Group(g.key(), g.posts(), round(g.lift()), round(g.avgScore()))).toList();
+        return in.stream().map(g -> new Group(g.key(), g.posts(), round(g.lift()), round(g.avgScore()), round(g.low()), round(g.high()))).toList();
     }
 
     private static String name(DayOfWeek d) { return d == null ? null : d.name(); }

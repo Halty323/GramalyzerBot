@@ -21,7 +21,9 @@ import java.util.function.Function;
  * <p>
  * The Bot API has no view counts, so they come from a public channel's web preview. Each post keeps its views 1, 6 and
  * 24 hours after posting ("marks"), filled in from the readings either side of a mark. The usual pace is the median of
- * the channel's recent posts at each mark.
+ * the channel's recent posts at each mark. A post judged against that pace is compared at 1 and 6 hours with posts from
+ * the same part of the day when there are enough of them: a post at 23:00 is read by few people in its first hour,
+ * which says nothing about the post.
  */
 @Service
 @RequiredArgsConstructor
@@ -148,11 +150,23 @@ public class ViewSpeedService {
 
     // ------------------------------------------------------------------ pace and report
 
-    /** The median views at each mark over the channel's recent posts, leaving {@code except} out. */
+    /**
+     * The median views at each mark over the channel's recent posts, leaving {@code except} out. With {@code except},
+     * the 1- and 6-hour marks use posts from its part of the day (night, morning, afternoon, evening) when at least
+     * {@value #MIN_HISTORY} have readings there.
+     */
     public Pace pace(Channel ch, Post except) {
         List<Post> recent = posts.findTop60ByChannelIdAndViews1hNotNullOrderByPostedAtDesc(ch.getId());
-        return new Pace(median(recent, Mark.H1, except), median(recent, Mark.H6, except), median(recent, Mark.H24, except));
+        if (except == null) return new Pace(median(recent, Mark.H1, null), median(recent, Mark.H6, null), median(recent, Mark.H24, null));
+        int part = dayPart(except, ch);
+        List<Post> same = recent.stream().filter(p -> dayPart(p, ch) == part).toList();
+        Integer h1 = median(same, Mark.H1, except), h6 = median(same, Mark.H6, except);
+        return new Pace(h1 != null ? h1 : median(recent, Mark.H1, except), h6 != null ? h6 : median(recent, Mark.H6, except),
+                median(recent, Mark.H24, except));
     }
+
+    /** 0 = night (0–6), 1 = morning, 2 = afternoon, 3 = evening, in the channel's time zone. */
+    static int dayPart(Post p, Channel ch) { return p.getPostedAt().atZone(ch.zone()).getHour() / 6; }
 
     private static Integer median(List<Post> recent, Mark m, Post except) {
         List<Integer> vals = new ArrayList<>();

@@ -45,7 +45,12 @@ public final class Labels {
 
     public static String windowShort(int days) { return days == 0 ? Tr.t("lbl.window_short.all") : Tr.t("lbl.window_short.days", days); }
 
-    public static String slot(Report.Slot s) { return Fmt.dayShort(s.day()) + " " + Fmt.hourRange(s.hour()); }
+    public static String slot(Report.Slot s) { return Fmt.dayShort(s.day()) + " " + window(s); }
+
+    /** "18:00–19:00" for an hour, "16:00–20:00" for a block of a channel that is still too young to tell hours apart. */
+    public static String window(Report.Slot s) {
+        return s.span() > 1 ? Fmt.hour(s.from()) + "–" + Fmt.hour((s.from() + s.span()) % 24) : Fmt.hourRange(s.hour());
+    }
 
     public static String confidence(Report.Confidence c) { return Tr.t("lbl.confidence." + c.name()); }
 

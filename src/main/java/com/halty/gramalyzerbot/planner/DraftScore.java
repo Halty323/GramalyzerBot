@@ -1,109 +1,122 @@
 package com.halty.gramalyzerbot.planner;
 
-import com.halty.gramalyzerbot.analytics.AnalysisEngine;
+import com.halty.gramalyzerbot.analytics.Backtest;
+import com.halty.gramalyzerbot.analytics.PostModel;
 import com.halty.gramalyzerbot.analytics.Report;
 import com.halty.gramalyzerbot.analytics.TextFeatures;
 
 import java.time.Instant;
 import java.time.ZoneId;
-import java.time.ZonedDateTime;
 import java.util.*;
 
 /**
- * How a draft is likely to do on its channel, from what worked there before: its format, length, link, time slot,
- * hashtags and words, each read off the channel's analysis as a lift (1.0 = a typical post). The expected lift
- * combines them, the weaker signals with less weight, and the score puts it on 1–99 (50 = typical, 100 = twice that).
+ * How a draft is likely to do on its channel, from what worked there before.
+ * <p>
+ * Format, length, link and time of day are read off the channel's {@link PostModel}, which fits them together, so a
+ * trait that merely travels with another (short posts that happen to be videos) isn't counted twice. Each factor
+ * carries a 90% range, and a better option is only suggested when the data clearly prefers it. The expected result
+ * goes on a 1–99 scale (50 = typical, 100 = twice that), but only when the model has proven itself on the channel's
+ * newest posts ({@link Backtest}); otherwise the factors are shown without a score.
+ * <p>
+ * Topics (hashtags) and words are shown for context but never counted or suggested: a hashtag labels a subject, and
+ * adding one to a post doesn't bring the readers that subject does. Telegram has no feed for it to boost.
  */
 public final class DraftScore {
 
-    public enum Dimension { FORMAT, LENGTH, LINK, TIME, HASHTAGS, KEYWORDS }
+    public enum Dimension { FORMAT, LENGTH, LINK, TIME, TOPIC, KEYWORDS }
 
     /** @param kind a {@link com.halty.gramalyzerbot.analytics.PostKind} name; @param at null when not chosen yet */
     public record Draft(String text, String kind, boolean link, Instant at) {}
 
     /**
-     * @param key     what the draft has (a kind, a length bucket, LINK/NOLINK, "MONDAY 18", hashtags, words)
-     * @param bestKey the channel's best choice on this dimension, when it's clearly better than the draft's
+     * @param key     what the draft has (a kind, a length bucket, LINK/NOLINK, the first hour of a 4-hour block, topics, words)
+     * @param low     the 90% range of {@code lift}
+     * @param bestKey the channel's best choice on this dimension, when the data clearly prefers it to the draft's
+     * @param counted whether the factor is part of the expected result (topics and words are context only)
      */
-    public record Factor(Dimension dimension, String key, double lift, String bestKey, Double bestLift, boolean weak) {}
+    public record Factor(Dimension dimension, String key, double lift, double low, double high, String bestKey, Double bestLift,
+                         boolean weak, boolean counted) {}
 
-    /** @param status learning (too few posts to judge) or ready; @param potential the expected lift with every weak factor fixed */
-    public record Result(String status, int score, double expected, double potential, List<Factor> factors, int postsRead) {}
+    /**
+     * @param status    learning (too few posts), ready (the score has predicted this channel's newest posts) or
+     *                  unproven (factors only: the score didn't beat chance on the newest posts, or there were too few to check)
+     * @param potential the expected lift with every weak factor fixed
+     * @param low       the 90% range of {@code expected}
+     */
+    public record Result(String status, int score, double expected, double potential, double low, double high,
+                         List<Factor> factors, int postsRead, Backtest.Check check) {}
 
     static final int MIN_POSTS = 10;
-    /** A factor is worth fixing when the channel's best option beats it by this much. */
+    /** A better option must beat the draft's by at least this much… */
     static final double BETTER = 0.15;
-    /** One weekday/hour cell rests on few posts, so time counts half and no single factor moves the result past these. */
+    /** …and by this many standard errors of the difference. */
+    static final double SURE = 1.28;
+    /** One block of the week rests on few posts, so its effect is never taken past these. */
     private static final double LOWEST = 0.5, HIGHEST = 2;
-    private static final Map<Dimension, Double> WEIGHT = Map.of(Dimension.FORMAT, 1.0, Dimension.TIME, 0.5, Dimension.LENGTH, 0.7,
-            Dimension.LINK, 0.5, Dimension.HASHTAGS, 0.5, Dimension.KEYWORDS, 0.5);
 
     private DraftScore() {}
 
     public static Result score(Report r, Draft d, ZoneId zone) {
-        if (!r.hasSignal() || r.eligible() < MIN_POSTS) return new Result("learning", 50, 1, 1, List.of(), r.eligible());
+        PostModel m = r.model();
+        if (!r.hasSignal() || r.eligible() < MIN_POSTS || m == null)
+            return new Result("learning", 50, 1, 1, 1, 1, List.of(), r.eligible(), r.check());
         String text = d.text() == null ? "" : d.text();
-        List<Factor> factors = new ArrayList<>();
-        group(r.kinds(), d.kind()).ifPresent(g -> factors.add(compare(Dimension.FORMAT, g.key(), g.lift(), best(r.kinds()))));
-        group(r.lengths(), AnalysisEngine.lengthBucket(text.codePointCount(0, text.length())))
-                .ifPresent(g -> factors.add(compare(Dimension.LENGTH, g.key(), g.lift(), best(r.lengths()))));
-        group(r.links(), d.link() ? "LINK" : "NOLINK").ifPresent(g -> factors.add(compare(Dimension.LINK, g.key(), g.lift(), best(r.links()))));
+        Integer hour = d.at() == null ? null : d.at().atZone(zone).getHour();
+        Map<PostModel.Dim, String> f = PostModel.features(d.kind(), text.codePointCount(0, text.length()), d.link(), hour);
 
-        if (d.at() != null) {
-            ZonedDateTime local = d.at().atZone(zone);
-            int day = local.getDayOfWeek().getValue() - 1, hour = local.getHour();
-            Optional<Report.Group> top = r.topSlots().stream().findFirst()
-                    .map(s -> new Report.Group(s.day().name() + " " + s.hour(), s.support(), s.lift(), 0));
-            factors.add(compare(Dimension.TIME, local.getDayOfWeek().name() + " " + hour, r.grid()[day][hour], top));
+        List<Factor> factors = new ArrayList<>();
+        double log = 0, fixedLog = 0, var = 0;
+        for (var e : f.entrySet()) {
+            Optional<PostModel.Effect> own = m.effect(e.getKey(), e.getValue());
+            if (own.isEmpty()) continue; // never tried on this channel: nothing to say
+            PostModel.Effect ef = own.get();
+            double b = clamp(m.beta(e.getKey(), e.getValue()));
+            Optional<PostModel.Effect> best = m.effects(e.getKey()).stream().filter(x -> x.posts() >= 3).findFirst();
+            boolean weak = best.isPresent() && !best.get().key().equals(ef.key())
+                    && best.get().lift() >= ef.lift() + BETTER
+                    && (Math.log(best.get().lift()) - Math.log(ef.lift())) / m.diffSe(e.getKey(), best.get().key(), ef.key()) >= SURE;
+            log += b;
+            fixedLog += weak ? clamp(Math.log(best.get().lift())) : b;
+            factors.add(new Factor(dimension(e.getKey()), ef.key(), round(ef.lift()), round(ef.low()), round(ef.high()),
+                    weak ? best.get().key() : null, weak ? round(best.get().lift()) : null, weak, true));
         }
+        double se = m.predictSe(f);
 
         List<String> tags = TextFeatures.hashtags(text);
         List<Report.Group> used = r.topics().stream().filter(g -> tags.contains(g.key())).toList();
-        Optional<Report.Group> winner = r.topics().stream().filter(g -> g.lift() >= 1.2 && !tags.contains(g.key()))
-                .max(Comparator.comparingDouble(Report.Group::lift));
-        if (!used.isEmpty()) {
-            double lift = used.stream().mapToDouble(Report.Group::lift).average().orElse(1);
-            factors.add(compare(Dimension.HASHTAGS, String.join(" ", used.stream().map(g -> "#" + g.key()).toList()), lift,
-                    winner.map(w -> new Report.Group("#" + w.key(), w.posts(), w.lift(), 0))));
-        } else if (winner.isPresent()) {
-            factors.add(compare(Dimension.HASHTAGS, "", 1, winner.map(w -> new Report.Group("#" + w.key(), w.posts(), w.lift(), 0))));
-        }
+        if (!used.isEmpty()) factors.add(context(Dimension.TOPIC, used.stream().map(g -> "#" + g.key()).toList(), used));
 
         Set<String> stems = new HashSet<>();
         for (String w : TextFeatures.keywords(text)) stems.add(TextFeatures.stem(w));
         List<Report.Group> words = r.keywords().stream().filter(g -> stems.contains(TextFeatures.stem(g.key()))).toList();
-        if (!words.isEmpty()) {
-            factors.add(new Factor(Dimension.KEYWORDS, String.join(", ", words.stream().map(Report.Group::key).toList()),
-                    round(words.stream().mapToDouble(Report.Group::lift).average().orElse(1)), null, null, false));
-        }
+        if (!words.isEmpty()) factors.add(context(Dimension.KEYWORDS, words.stream().map(Report.Group::key).toList(), words));
 
-        double expected = combine(factors, false), potential = combine(factors, true);
+        double expected = bound(Math.exp(log)), potential = bound(Math.exp(fixedLog));
         int score = (int) Math.round(Math.max(1, Math.min(99, 50 + 50 * Math.log(expected) / Math.log(2))));
-        return new Result("ready", score, round(expected), round(Math.max(expected, potential)), factors, r.eligible());
+        String status = r.check().proven() ? "ready" : "unproven";
+        return new Result(status, score, round(expected), round(Math.max(expected, potential)),
+                round(bound(Math.exp(log - 1.645 * se))), round(bound(Math.exp(log + 1.645 * se))), factors, r.eligible(), r.check());
     }
 
-    private static Optional<Report.Group> group(List<Report.Group> groups, String key) {
-        return groups.stream().filter(g -> g.key().equals(key)).findFirst();
+    private static Factor context(Dimension d, List<String> keys, List<Report.Group> groups) {
+        double lift = groups.stream().mapToDouble(Report.Group::lift).average().orElse(1);
+        double low = groups.stream().mapToDouble(Report.Group::low).min().orElse(lift);
+        double high = groups.stream().mapToDouble(Report.Group::high).max().orElse(lift);
+        return new Factor(d, String.join(d == Dimension.TOPIC ? " " : ", ", keys), round(lift), round(low), round(high), null, null, false, false);
     }
 
-    private static Optional<Report.Group> best(List<Report.Group> groups) {
-        return groups.stream().filter(g -> g.posts() >= 3).max(Comparator.comparingDouble(Report.Group::lift));
+    private static Dimension dimension(PostModel.Dim d) {
+        return switch (d) {
+            case FORMAT -> Dimension.FORMAT;
+            case LENGTH -> Dimension.LENGTH;
+            case LINK -> Dimension.LINK;
+            case TIME -> Dimension.TIME;
+        };
     }
 
-    private static Factor compare(Dimension d, String key, double lift, Optional<Report.Group> best) {
-        boolean weak = best.isPresent() && !best.get().key().equals(key) && best.get().lift() >= lift + BETTER;
-        return new Factor(d, key, round(lift), weak ? best.get().key() : null, weak ? round(best.get().lift()) : null, weak);
-    }
+    private static double clamp(double log) { return Math.max(Math.log(LOWEST), Math.min(Math.log(HIGHEST), log)); }
 
-    /** exp(Σ weight · ln lift), with each weak factor at its best option when {@code fixed}. */
-    private static double combine(List<Factor> factors, boolean fixed) {
-        double log = 0;
-        for (Factor f : factors) {
-            double lift = fixed && f.weak() ? f.bestLift() : f.lift();
-            log += WEIGHT.get(f.dimension()) * Math.log(Math.max(LOWEST, Math.min(HIGHEST, lift)));
-        }
-        return Math.max(0.3, Math.min(3, Math.exp(log)));
-    }
+    private static double bound(double x) { return Math.max(0.3, Math.min(3, x)); }
 
     private static double round(double x) { return Math.round(x * 100) / 100.0; }
 }

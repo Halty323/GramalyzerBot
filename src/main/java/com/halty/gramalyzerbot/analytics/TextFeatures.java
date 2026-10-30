@@ -23,7 +23,21 @@ public final class TextFeatures {
             "dans pour avec cette sont mais plus être avoir fait comme tout tous nous vous elle elles leur leurs aussi sans sous très donc alors ainsi",
             "только будет когда чтобы этого также между после перед очень можно нужно может который которые потому более этот была были есть свой себя всех всего даже").split(" "));
 
+    /**
+     * Marks of a paid post: ad hashtags in the common languages, Russia's "erid" ad token, or a post that opens with
+     * "Реклама" / "Advertising". Sponsored posts usually reach fewer readers and say nothing about what the channel's
+     * own audience likes, so the analysis leaves them out.
+     */
+    private static final Pattern AD = Pattern.compile(
+            "(?iU)(?<![\\p{L}\\p{N}_])#(?:ad|ads|advert|advertising|sponsored|promo|partner|реклама|промо|партнер|партнёр|спонсор|anuncio|publicidad|publicidade|patrocinado|reklam|iklan|werbung|anzeige)(?![\\p{L}\\p{N}_])"
+                    + "|\\berid\\s*[:=]?\\s*[\\p{L}\\p{N}]{6,}"
+                    + "|^\\s*(?:реклама|advertising|sponsored)\\b");
+
     private TextFeatures() {}
+
+    public static boolean isAd(String text) {
+        return text != null && !text.isBlank() && AD.matcher(text).find();
+    }
 
     /** Lower-cased hashtags without the leading '#', in order of appearance. */
     public static List<String> hashtags(String text) {

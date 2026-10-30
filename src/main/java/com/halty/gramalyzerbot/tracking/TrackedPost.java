@@ -38,6 +38,10 @@ public class TrackedPost {
     /** Null when Telegram didn't show a counter (it always does for channel posts, but be safe). */
     private Integer views;
 
+    /** Views at about a day old: the first reading between 24 and 48 hours after posting, if there was one. */
+    @Column(name = "views_24h")
+    private Integer views24h;
+
     @Column(nullable = false)
     private int reactions;
 
