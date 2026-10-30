@@ -99,7 +99,7 @@ public class BotApi {
     }
 
     /** The commands in Telegram's menu, in order; their descriptions are {@code cmd.<name>} in each language. */
-    static final List<String> COMMANDS = List.of("menu", "overview", "times", "content", "top", "growth", "promo", "watchlist", "track", "settings",
+    static final List<String> COMMANDS = List.of("menu", "overview", "times", "content", "top", "growth", "promo", "speed", "gaps", "seo", "watchlist", "track", "settings",
             "team", "channels", "import", "plan", "language", "demo", "help", "paysupport", "cancel");
 
     /** Publishes the command menu in every language and learns who we are – after startup, so a slow Telegram never delays it. */

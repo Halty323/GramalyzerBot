@@ -115,6 +115,8 @@ All under `/api`, with the same auth as before (session cookie from `POST /api/l
 | **PUT** | **`/api/channels/{id}/cross-promo/profile`** | **new:** `{"topic": "TECH", "language": "en", "pitch": "…", "enabled": true}` |
 | **POST** | **`/api/channels/{id}/cross-promo/swaps`** | **new:** `{"partner": 42}` asks a matched channel to swap posts |
 | **GET** | **`/api/channels/{id}/views`** | **new:** view speed: the channel's usual views 1, 6 and 24 hours after posting, and each recent post against it (`ViewSpeed`) |
+| **GET** | **`/api/channels/{id}/gaps`** | **new:** competitor gaps: formats, hours, lengths and topics that win for the watchlist and not for this channel, and where it's ahead (`CompetitorGaps`) |
+| **GET** | **`/api/channels/{id}/search-check`** | **new:** how findable the channel is in Telegram search: a score out of 100, checks, the words its posts are about, title and username ideas (`SearchCheck`) |
 | **POST** | **`/api/channels/{id}/cross-promo/swaps/{swapId}/{accept,decline,cancel,end}`** | **new:** answer, take back or end a swap; accepting makes a promo link in both channels |
 | **POST** | **`/api/media?name=`** | **new:** upload a picture, GIF or video for a queued post (raw body with its `Content-Type`; 10 MB for pictures, 50 MB otherwise). Returns `{id, kind, name}` for the post's `media` list. Unused uploads are removed after a day. |
 | GET | `/api/media/{id}` | an uploaded file |
@@ -152,6 +154,21 @@ For public channels the bot reads each post's views from the channel's public pa
 * **Alerts.** A new post under 60% of the usual pace at 1 or 6 hours ("lagging") or over 180% ("flying") sends one alert to team members with the digest on, with tips, the channel's next good slot and a 📌 Pin button (silent pin, needs the bot's pin right).
 * **Views metric.** "Views after 24 hours" can be picked as the success metric, so best-time advice ranks by views instead of reactions. Private channels have no public page, so they can't use it.
 * `/speed` (or ⚡ on the dashboard) and the website's Insights page show each post's three marks. Sample channels get generated views, with the newest post lagging.
+
+## Competitor gaps
+
+`/gaps` (or 🔍 on the dashboard, or the website's Insights page) compares a channel with the watchlist (`gaps` package). Channels differ in size, so every post is scored against its own channel's median ("lift", 1.0× = a typical post there): competitors by views, the user's channel by views when the public page shows them and by reactions and comments otherwise. Posts under 12 hours old are left out.
+
+* Posts are grouped by format, 4-hour block, length and topic (words and hashtags; words in more than 35% of a channel's posts are its signature and skipped).
+* A **gap** is a group that does at least 1.15× for competitors (4+ posts, 3+ for topics) that the user rarely posts (under half their share) or that works clearly worse for them. Groups made of mostly the same posts count once, so "video" and "tutorial" aren't two findings when every tutorial is a video. Each gap shows the competitors' best post as an example.
+* **Where you're ahead** lists groups that do 1.15× or more for the user and clearly less for competitors.
+* It needs 15 competitor posts and 8 of the user's. A sample channel that watches only sample channels is compared with three sample competitors built in memory. The website's "Explain with AI" turns the gaps into a plan with the user's own AI provider.
+
+## Search check
+
+`/seo` (or 🔎 on the dashboard, or Insights) scores how findable a channel is in Telegram search out of 100 (`seo` package). Telegram matches the title and username, so those carry most of the points: public at all (15), title length (10), title or username has the channel's main word (25), no emoji or symbol clutter (10), a readable username (10) that matches the title or topic (10), a description (10) that uses the channel's words (10).
+
+Nobody outside Telegram knows search counts, so the channel's words come from its own posts: words in at least 3 posts and hashtags in 2, minus signatures and words every channel uses. It suggests titles with the main word added and Latin usernames made of the title and topic words; the website's "Rewrite with AI" drafts names and a description. The description is read with `getChat` and kept for an hour.
 
 ## Cross-promo
 

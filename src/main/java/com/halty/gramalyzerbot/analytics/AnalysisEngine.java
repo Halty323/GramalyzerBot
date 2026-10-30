@@ -202,7 +202,7 @@ public final class AnalysisEngine {
         return out;
     }
 
-    static String lengthBucket(int len) {
+    public static String lengthBucket(int len) {
         if (len == 0) return "NONE";
         if (len <= 120) return "SHORT";
         if (len <= 400) return "MEDIUM";
