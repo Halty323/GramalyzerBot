@@ -17,38 +17,41 @@ public final class Models {
     public record LinkButton(@NotBlank @Size(max=40) String text, @NotBlank @Size(max=500) String url) {}
     /**
      * media: up to 10 pictures/videos (2+ go out as an album); buttons: link buttons under the post (not possible on albums);
-     * silent: sent without a notification sound; pin: pinned in the channel once sent.
+     * silent: sent without a notification sound; pin: pinned in the channel once sent; repostOf: the channel's own
+     * earlier message(s) to copy as they are (an evergreen repost; several for an album), body then only describes it.
      */
     public record Post(String id, String channelId, String title, String body, String status, Instant scheduledAt,
                        long views, long reactions, long shares, String category,
                        String deliveryState, Long telegramMessageId, String deliveryError,
-                       List<MediaRef> media, List<LinkButton> buttons, boolean silent, boolean pin) {
+                       List<MediaRef> media, List<LinkButton> buttons, boolean silent, boolean pin, List<Integer> repostOf) {
         public Post {
             media = media == null ? List.of() : List.copyOf(media);
             buttons = buttons == null ? List.of() : List.copyOf(buttons);
+            repostOf = repostOf == null ? List.of() : List.copyOf(repostOf);
         }
         /** A text post without media, buttons or options. */
         public Post(String id, String channelId, String title, String body, String status, Instant scheduledAt,
                     long views, long reactions, long shares, String category,
                     String deliveryState, Long telegramMessageId, String deliveryError) {
-            this(id, channelId, title, body, status, scheduledAt, views, reactions, shares, category, deliveryState, telegramMessageId, deliveryError, List.of(), List.of(), false, false);
+            this(id, channelId, title, body, status, scheduledAt, views, reactions, shares, category, deliveryState, telegramMessageId, deliveryError, List.of(), List.of(), false, false, List.of());
         }
         public Post withDelivery(String status, String deliveryState, Long telegramMessageId, String deliveryError) {
-            return new Post(id, channelId, title, body, status, scheduledAt, views, reactions, shares, category, deliveryState, telegramMessageId, deliveryError, media, buttons, silent, pin);
+            return new Post(id, channelId, title, body, status, scheduledAt, views, reactions, shares, category, deliveryState, telegramMessageId, deliveryError, media, buttons, silent, pin, repostOf);
         }
         public Post withText(String title, String body) {
-            return new Post(id, channelId, title, body, status, scheduledAt, views, reactions, shares, category, deliveryState, telegramMessageId, deliveryError, media, buttons, silent, pin);
+            return new Post(id, channelId, title, body, status, scheduledAt, views, reactions, shares, category, deliveryState, telegramMessageId, deliveryError, media, buttons, silent, pin, repostOf);
         }
+        public boolean repost() {return !repostOf.isEmpty();}
     }
-    /** media, buttons, silent and pin left out (null) keep what the post had, so older clients don't wipe them. */
+    /** media, buttons, silent, pin and repostOf left out (null) keep what the post had, so older clients don't wipe them. */
     public record PostInput(@NotBlank String channelId, @NotBlank @Size(max=180) String title,
                             @NotNull @Size(max=4096) String body,
                             @Pattern(regexp="draft|scheduled") @NotNull String status,
                             @NotNull Instant scheduledAt, @Size(max=40) String category,
                             @Size(max=10) List<@Valid @NotNull MediaRef> media, @Size(max=8) List<@Valid @NotNull LinkButton> buttons,
-                            Boolean silent, Boolean pin) {
+                            Boolean silent, Boolean pin, @Size(max=10) List<@NotNull @Positive Integer> repostOf) {
         public PostInput(String channelId, String title, String body, String status, Instant scheduledAt, String category) {
-            this(channelId, title, body, status, scheduledAt, category, null, null, null, null);
+            this(channelId, title, body, status, scheduledAt, category, null, null, null, null, null);
         }
     }
     public record History(String channelId, String date, long subscribers) {}

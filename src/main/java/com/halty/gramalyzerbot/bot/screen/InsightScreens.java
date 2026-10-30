@@ -331,7 +331,7 @@ public class InsightScreens {
     }
 
     /** "12 Oct 18:40" in the current language. */
-    static String when(java.time.ZonedDateTime t) {
+    public static String when(java.time.ZonedDateTime t) {
         return DateTimeFormatter.ofPattern("d MMM HH:mm", Tr.locale()).format(t).replace(".", "");
     }
 

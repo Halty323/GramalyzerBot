@@ -94,7 +94,7 @@ public class HomeScreen {
                 Btn.cb(Tr.t("btn.content"), Cb.of("nav:content", id, ch.getWindowDays(), "main")));
         v.row(Btn.cb(Tr.t("btn.top"), Cb.of("nav:top", id, 0)), Btn.cb(Tr.t("btn.growth"), Cb.of("nav:growth", id, 30)));
         v.row(Btn.cb(Tr.t("btn.speed"), Cb.of("vs:list", id)), Btn.cb(Tr.t("btn.gaps"), Cb.of("gap:list", id)));
-        v.row(Btn.cb(Tr.t("btn.seo"), Cb.of("seo:show", id)));
+        v.row(Btn.cb(Tr.t("btn.seo"), Cb.of("seo:show", id)), Btn.cb(Tr.t("btn.evergreen"), Cb.of("ev:list", id)));
         if (role.can(Permission.CHANGE_SETTINGS)) {
             v.row(Btn.cb(Tr.t("btn.settings"), Cb.of("set:home", id)), Btn.cb(Tr.t("btn.team"), Cb.of("team:home", id)));
         } else {

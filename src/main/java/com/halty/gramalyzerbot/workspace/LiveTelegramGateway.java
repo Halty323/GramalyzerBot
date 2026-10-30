@@ -4,6 +4,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
+import org.telegram.telegrambots.meta.api.methods.CopyMessage;
+import org.telegram.telegrambots.meta.api.methods.CopyMessages;
 import org.telegram.telegrambots.meta.api.methods.GetFile;
 import org.telegram.telegrambots.meta.api.methods.pinnedmessages.PinChatMessage;
 import org.telegram.telegrambots.meta.api.methods.send.*;
@@ -29,6 +31,7 @@ public class LiveTelegramGateway implements TelegramGateway {
     public LiveTelegramGateway(TelegramClient client,WorkspaceMedia files) {this.client=client;this.files=files;}
     /** Text, one picture/video/GIF with its caption, or an album (caption on the first item); then pins it if asked. Returns the (first) message id. */
     public long publish(Channel channel,Post post) throws Exception {
+        if(post.repost()) return repost(channel,post);
         String text=post.body()+(channel.signature().isBlank()?"":(post.body().isBlank()?"":"\n\n")+channel.signature());
         if(text.length()>(post.media().isEmpty()?4096:1024)) throw new IllegalArgumentException("Message and signature exceed Telegram's limit.");
         String chat=String.valueOf(channel.telegramChatId()); String caption=text.isBlank()?null:text; InlineKeyboardMarkup keyboard=keyboard(post.buttons());
@@ -54,6 +57,18 @@ public class LiveTelegramGateway implements TelegramGateway {
         if(post.pin()) {
             try {client.execute(PinChatMessage.builder().chatId(chat).messageId((int)id).disableNotification(post.silent()).build());}
             catch(Exception e) {log.warn("Post {} was sent but could not be pinned: {}",post.id(),e.getMessage());}
+        }
+        return id;
+    }
+    /** An evergreen repost: the channel's earlier message (or album) copied as it was, without "forwarded from". */
+    private long repost(Channel channel,Post post) throws Exception {
+        String chat=String.valueOf(channel.telegramChatId());
+        long id=post.repostOf().size()==1
+                ?client.execute(CopyMessage.builder().chatId(chat).fromChatId(chat).messageId(post.repostOf().getFirst()).disableNotification(post.silent()).build()).getMessageId()
+                :client.execute(CopyMessages.builder().chatId(chat).fromChatId(chat).messageIds(post.repostOf()).disableNotification(post.silent()).build()).getFirst().getMessageId();
+        if(post.pin()) {
+            try {client.execute(PinChatMessage.builder().chatId(chat).messageId((int)id).disableNotification(post.silent()).build());}
+            catch(Exception e) {log.warn("Repost {} was sent but could not be pinned: {}",post.id(),e.getMessage());}
         }
         return id;
     }
