@@ -249,6 +249,11 @@ pub struct App {
     pub dark: bool,
     pub client: Client,
     pub conn: Conn,
+    /// The server is refreshing every channel because Studio opened: reload everything once it is done.
+    refresh_pending: bool,
+    closing: bool,
+    /// The error banner says the server is unreachable: it goes away by itself once the server answers again.
+    offline: bool,
     pub workspace: Option<Workspace>,
     pub tracked: Option<Vec<TrackedSummary>>,
     pub insights: HashMap<String, Result<Insights, ApiError>>,
@@ -282,6 +287,11 @@ pub struct App {
 #[derive(Debug, Clone)]
 pub enum Message {
     Tick,
+    /// The server answered "refresh every channel" (asked when Studio opens), or how that pass is going.
+    RefreshAsked(Result<RefreshStatus, ApiError>),
+    /// The window's close button: ask the server for one last refresh, then exit.
+    CloseRequested(iced::window::Id),
+    Exit,
     ToastTick,
     Workspace(Result<Workspace, ApiError>),
     Tracked(Result<Vec<TrackedSummary>, ApiError>),
@@ -472,6 +482,9 @@ impl App {
             dark,
             client: client.clone(),
             conn: Conn::Connecting,
+            refresh_pending: false,
+            closing: false,
+            offline: false,
             workspace: None,
             tracked: None,
             insights: HashMap::new(),
@@ -776,10 +789,45 @@ impl App {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Tick => {
-                if self.conn == Conn::Ready {
-                    return self.reload();
+                match &self.conn {
+                    Conn::Ready if self.refresh_pending => {
+                        return Task::batch([self.reload(), Task::perform(self.client.clone().refresh_status(), Message::RefreshAsked)]);
+                    }
+                    Conn::Ready => return self.reload(),
+                    // the server is down or still starting: keep trying, so Studio reconnects by itself
+                    Conn::Failed(_) => return self.reload(),
+                    // the Docker setup shares the token in a file the server may only just have written
+                    Conn::Login(_) => {
+                        if let Some(t) = config::token_from_file().filter(|t| *t != self.config.token) {
+                            self.config.token = t;
+                            self.client = Client::new(&self.config.server, &self.config.token);
+                            return self.reload();
+                        }
+                    }
+                    Conn::Connecting => {}
                 }
             }
+            Message::RefreshAsked(r) => {
+                let was = self.refresh_pending;
+                self.refresh_pending = matches!(r, Ok(RefreshStatus { running: true, .. }));
+                if was && !self.refresh_pending && r.is_ok() {
+                    return self.update(Message::Reload);
+                }
+            }
+            Message::CloseRequested(id) => {
+                if self.closing || self.conn != Conn::Ready {
+                    return iced::window::close(id).chain(iced::exit());
+                }
+                self.closing = true;
+                let client = self.client.clone();
+                return Task::perform(
+                    async move {
+                        let _ = tokio::time::timeout(Duration::from_secs(4), client.refresh_all("studio-close")).await;
+                    },
+                    |_| Message::Exit,
+                );
+            }
+            Message::Exit => return iced::exit(),
             Message::ToastTick => {
                 if self.toast.as_ref().is_some_and(|(_, at)| at.elapsed() > Duration::from_secs(4)) {
                     self.toast = None;
@@ -793,8 +841,14 @@ impl App {
                 }
                 self.workspace = Some(w);
                 self.conn = Conn::Ready;
+                if self.offline {
+                    self.offline = false;
+                    self.error = None;
+                }
                 let mut tasks: Vec<Task<Message>> = photos.into_iter().map(|u| self.want_photo(u)).collect();
                 if first {
+                    // opening Studio brings every channel up to date; Tick reloads once the server is done
+                    tasks.push(Task::perform(self.client.clone().refresh_all("studio-open"), Message::RefreshAsked));
                     tasks.push(Task::perform(self.client.clone().tracked(), Message::Tracked));
                     tasks.push(self.load_grounding());
                     if let Some(c) = self.focus_channel() {
@@ -812,6 +866,7 @@ impl App {
                     self.conn = Conn::Login(msg);
                 } else if self.workspace.is_some() {
                     self.error = Some(self.api_error(&e));
+                    self.offline = true;
                 } else {
                     self.conn = Conn::Failed(self.api_error(&e));
                 }
@@ -1672,6 +1727,7 @@ impl App {
     pub fn subscription(&self) -> Subscription<Message> {
         let mut subs = vec![
             iced::time::every(Duration::from_secs(15)).map(|_| Message::Tick),
+            iced::window::close_requests().map(Message::CloseRequested),
             keyboard::listen().filter_map(|e| match e {
                 keyboard::Event::KeyPressed { key, modifiers, .. } => Some(Message::Key(key, modifiers)),
                 _ => None,

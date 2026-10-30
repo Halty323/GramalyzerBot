@@ -33,21 +33,42 @@ The demo profile never starts Telegram polling or sends posts. It uses a separat
 
 ### Docker
 
-One image holds the backend and the website: Spring serves the built website, so everything is on port 8080. Check out GramalyzerVibe next to this repository, as for local development. Then:
+Everything runs on your own machine as two containers. Check out GramalyzerVibe next to this repository, as for local development. Then:
 
 ```sh
-# demo: sample data, Telegram off, nothing to configure
-docker compose -f compose.demo.yaml up --build          # → http://localhost:8080
+docker compose up -d --build                  # both containers
+#   gramalyzer: backend + Telegram bot + website  → http://localhost:8080
+#   studio:     Gramalyzer Studio in the browser   → http://localhost:6080
 
-# live: PostgreSQL + bot + website
-cp .env.example .env                                    # set POSTGRES_PASSWORD, GRAMALYZER_API_TOKEN, and the Telegram settings
-docker compose up -d --build                            # → http://localhost:8080
-docker compose logs -f app                              # first start: look for "/claim CODE" if BOT_ADMINS is empty
+docker compose up -d --build gramalyzer       # only the bot and the website
+docker compose up -d --build studio           # only Studio
+docker compose exec gramalyzer cat /app/keys/api-token   # the token to sign in to the website with
+docker compose logs -f gramalyzer             # first start with a bot: look for "/claim CODE" if BOT_ADMINS is empty
 ```
 
-* **Data:** the live database lives in the `db-data` volume; the demo's H2 files live in `demo-data`.
-* **Port:** it is bound to `127.0.0.1` only. To expose it, put a reverse proxy with HTTPS in front, or use `compose.vps.yaml` (Caddy) as described in [deploy/VPS.md](deploy/VPS.md). Spring honours `X-Forwarded-*` headers, so the session cookie is marked `Secure` behind HTTPS.
-* **Updates:** `git pull` in both checkouts, then `docker compose up -d --build`. Flyway migrates the database on start.
+Nothing has to be configured. On its first start the `gramalyzer` container makes a workspace token and keeps it in the `gramalyzer-keys` volume; Studio reads it from there and signs in by itself. To switch the bot on, `cp .env.example .env` and set `TELEGRAM_BOT_TOKEN` (and `BOT_ADMINS`). A token in `.env` replaces the generated one.
+
+**Every channel is refreshed when things open or close.** Each pass reads every managed channel (member counts of the bot's and the website's channels, view marks of own posts) and every watched public channel (posts, views, subscribers), stalest first. It runs:
+
+* when the `gramalyzer` container starts, and when it stops: `docker stop` sends SIGTERM, the server refreshes for up to `REFRESH_STOP_BUDGET` (25 s), backs up the database, then shuts down. Channels it doesn't reach are read first on the next start;
+* when the website or the mobile app is opened or closed, and when Studio is opened or closed (the Studio container also asks on `docker stop`). These go through `POST /api/refresh`, which skips channels read in the last 2 minutes and runs at most once a minute, so reopening an app never hammers `t.me`.
+
+**Failsafe by design:**
+
+* *Restarts:* both containers have health checks and `restart: unless-stopped`, so a crash, an out-of-memory JVM (`ExitOnOutOfMemoryError`) or a reboot of the machine brings them back. `init: true` forwards Docker's stop signal, and `stop_grace_period` leaves room for the last refresh.
+* *Data:* the built-in H2 database lives in the `gramalyzer-data` volume. It is copied to `gramalyzer-backups` once a day and on every shutdown (the newest `BACKUP_KEEP`, default 7, are kept). To restore one: `docker compose stop gramalyzer`, unzip the backup into the data volume, start it again.
+* *Sign-ins* are signed cookies, so the website stays signed in when the server restarts. Changing the token signs everyone out.
+* *Reconnecting:* the website, the app and Studio keep retrying while the server is down and pick up where they were; Studio waits for the token if it starts first.
+* *One bad channel* (deleted, private, `t.me` unreachable) keeps its last good data and never stops the others.
+* *Only this machine* can reach ports 8080 and 6080 (bound to `127.0.0.1`). If anything else can reach 6080, set `STUDIO_VNC_PASSWORD`. Logs rotate (5 × 10 MB per container).
+
+Other setups:
+
+* **Demo** with sample data, Telegram off: `docker compose -f compose.demo.yaml up --build` → http://localhost:8080. Its H2 files live in `demo-data`.
+* **PostgreSQL** instead of the built-in database: `docker compose -f compose.yaml -f compose.postgres.yaml up -d --build` (set `POSTGRES_PASSWORD`). Back it up with `pg_dump`.
+* **A public server with HTTPS** (Caddy): see [deploy/VPS.md](deploy/VPS.md). Spring honours `X-Forwarded-*` headers, so the session cookie is marked `Secure` behind HTTPS.
+* **Studio as a native window** instead of a container: the binaries in [desktop/README.md](desktop/README.md). They refresh on open and close in the same way.
+* **Updates:** `git pull` in both checkouts, then `docker compose up -d --build`. Flyway migrates the database on start, after a backup was taken on the way down.
 * **Tests:** the image build skips them (`-DskipTests`); run `mvn test` or CI before deploying.
 
 ### Configuration files
@@ -74,8 +95,12 @@ It is also left out of Docker images, so containers are configured only through 
 | `SPRING_DATASOURCE_URL` / `_USERNAME` / `_PASSWORD` | – | PostgreSQL in production. The default is a local H2 file. |
 | `TRACKING_REFRESH_ENABLED` | – | `true` (default): refresh watched public channels in the background. Switch it off where `t.me` can't be reached. |
 | `TRACKING_REFRESH_EVERY` | – | How often each watched public channel is fetched again (default `PT2H`). Every visit adds that day to its subscriber history. |
+| `REFRESH_ON_START` / `REFRESH_ON_STOP` | – | `true` (default): refresh every managed and watched channel when the server starts / before it stops |
+| `REFRESH_STOP_BUDGET` | – | How long the last refresh before shutdown may take (default `PT25S`); keep Docker's `stop_grace_period` above it plus 15 s |
+| `REFRESH_COOLDOWN` | – | Minimum gap between refreshes the apps ask for (default `PT1M`) |
+| `BACKUP_ENABLED` / `BACKUP_DIR` / `BACKUP_KEEP` | – | Daily and shutdown zip copies of the built-in H2 database (default on, `./.data/backups`, keep 7). Ignored with PostgreSQL. |
 | `TRACKING_MAX_PER_PERSON` / `TRACKING_MAX_WEB` | – | Watchlist sizes: per person in the bot (default 20; only while paid plans are off) and for the website (default 100) |
-| `BILLING_ENABLED` | – | Paid plans in the bot (see below). Off by default for local runs and the demo; `compose.yaml` turns it on |
+| `BILLING_ENABLED` | – | Paid plans in the bot (see below). Off by default for local runs and the demo; `compose.vps.yaml` turns it on |
 | `BILLING_CREATOR_STARS` / `BILLING_PRO_STARS` | – | Monthly prices in Telegram Stars (defaults 250 and 750). New subscriptions use the new price; running ones keep theirs |
 
 Then add the bot to your channel as an admin. To let the website's queue publish, give the bot **Post messages**. For comment counts, also add it to the linked discussion group. Open the bot in a private chat and tap **Connect my channel**, or just add it: the person who adds it becomes the channel's Owner in the bot.
@@ -108,6 +133,8 @@ All under `/api`, with the same auth as before (session cookie from `POST /api/l
 | **GET** | **`/api/tracked/{username}?tz=`** | **new:** any public channel, watched or not: info, stats, top posts and the latest ~60 posts (`TrackedDetail`) |
 | **POST** | **`/api/tracked/{username}/refresh`** | **new:** fetch it again now |
 | **DELETE** | **`/api/tracked/{username}`** | **new:** remove it from the watchlist (204) |
+| **POST** | **`/api/refresh?reason=`** | **new:** refresh every managed and watched channel in the background (202). The website, the app and Studio call it when they open and close. Skipped when a pass ran in the last minute. |
+| **GET** | **`/api/refresh`** | **new:** `{running, current, last}`: how the last pass went (`channels`, `refreshed`, `failed`, `left` for next time) |
 | **GET** | **`/api/channels/{id}/growth?days=30`** | **new:** joins and leaves of an own channel per day, the posts that brought or lost the most people, and promo links (`ChannelGrowth`) |
 | **POST** | **`/api/channels/{id}/promo-links`** | **new:** `{"name": "Shoutout in @friend", "cost": 20, "currency": "$"}` makes an invite link for one promo (needs the bot's "invite users via link" right) |
 | **DELETE** | **`/api/channels/{id}/promo-links/{linkId}`** | **new:** revoke a promo link; the people who joined through it stay counted |

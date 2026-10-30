@@ -74,6 +74,13 @@ impl Client {
     pub async fn workspace(self) -> Result<Workspace> {
         self.get("/workspace").await
     }
+    /// Asks the server to bring every managed and watched channel up to date (it skips this if it just did).
+    pub async fn refresh_all(self, reason: &'static str) -> Result<RefreshStatus> {
+        self.send(self.request(Method::POST, &format!("/refresh?reason={reason}"))).await
+    }
+    pub async fn refresh_status(self) -> Result<RefreshStatus> {
+        self.get("/refresh").await
+    }
     pub async fn insights(self, id: String) -> Result<Insights> {
         self.get(&format!("/channels/{}/insights", enc(&id))).await
     }

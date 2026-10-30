@@ -1,53 +1,95 @@
-# Live setup: PostgreSQL + Gramalyzer (backend, Telegram bot and website) on http://localhost:8080
+# Gramalyzer on your own computer, as two containers:
 #
-#   cp .env.example .env        # fill in at least POSTGRES_PASSWORD and GRAMALYZER_API_TOKEN
-#   docker compose up -d --build
+#   gramalyzer  the backend, the Telegram bot and the website   → http://localhost:8080
+#   studio      Gramalyzer Studio, the desktop app, in a browser → http://localhost:6080
 #
-# Needs the GramalyzerVibe checkout next to this one (../GramalyzerVibe), or set GRAMALYZER_VIBE_DIR in .env.
-# For the sample-data demo without Telegram, use compose.demo.yaml instead.
+#   docker compose up -d --build              # both
+#   docker compose up -d --build gramalyzer   # only the bot and the website
+#   docker compose up -d --build studio       # only Studio (it waits for the server and connects by itself)
+#
+# Nothing has to be configured: the data stays in Docker volumes on this machine, a workspace token is made on the
+# first start and Studio picks it up. Put TELEGRAM_BOT_TOKEN (and BOT_ADMINS) in .env to switch the bot on; see
+# .env.example. Needs the GramalyzerVibe checkout next to this one (../GramalyzerVibe), or GRAMALYZER_VIBE_DIR.
+#
+# Every managed and watched channel is refreshed whenever a container starts or stops, and whenever the website or
+# Studio is opened or closed. See README "Docker".
+#
+# PostgreSQL instead of the built-in database: add -f compose.postgres.yaml. A public server with HTTPS: deploy/VPS.md.
+
+name: gramalyzer
+
+x-logs: &logs
+  # rotated, so a chatty week can never fill the disk
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "5"
 
 services:
-  db:
-    image: postgres:17-alpine
-    environment:
-      POSTGRES_DB: gramalyzer
-      POSTGRES_USER: gramalyzer
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-    volumes:
-      - db-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gramalyzer -d gramalyzer"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-    restart: unless-stopped
-
-  app:
+  gramalyzer:
     build:
       context: .
       additional_contexts:
         vibe: ${GRAMALYZER_VIBE_DIR:-../GramalyzerVibe}
     image: gramalyzer:local
-    depends_on:
-      db:
-        condition: service_healthy
+    init: true
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/gramalyzer
-      SPRING_DATASOURCE_USERNAME: gramalyzer
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
-      GRAMALYZER_API_TOKEN: ${GRAMALYZER_API_TOKEN:?set GRAMALYZER_API_TOKEN in .env}
-      TELEGRAM_BOT_ENABLED: ${TELEGRAM_BOT_ENABLED:-false}
+      GRAMALYZER_API_TOKEN: ${GRAMALYZER_API_TOKEN:-}
+      TELEGRAM_BOT_ENABLED: ${TELEGRAM_BOT_ENABLED:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       BOT_ADMINS: ${BOT_ADMINS:-${BOT_ADMIN_IDS:-}}
       BOT_PUBLIC_REGISTRATION: ${BOT_PUBLIC_REGISTRATION:-true}
       BOT_DEFAULT_TIMEZONE: ${BOT_DEFAULT_TIMEZONE:-UTC}
-      BILLING_ENABLED: ${BILLING_ENABLED:-true}
+      BILLING_ENABLED: ${BILLING_ENABLED:-false}
       BILLING_CREATOR_STARS: ${BILLING_CREATOR_STARS:-250}
       BILLING_PRO_STARS: ${BILLING_PRO_STARS:-750}
+      REFRESH_STOP_BUDGET: ${REFRESH_STOP_BUDGET:-PT25S}
+      BACKUP_KEEP: ${BACKUP_KEEP:-7}
+    volumes:
+      - gramalyzer-data:/app/.data
+      - gramalyzer-keys:/app/keys
+      - gramalyzer-backups:/app/backups
     ports:
-      # Only reachable from this machine. Put a reverse proxy with HTTPS in front before exposing it.
-      - "127.0.0.1:8080:8080"
+      # only reachable from this machine
+      - "127.0.0.1:${GRAMALYZER_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 120s
+      retries: 3
+    # time for the last channel refresh (REFRESH_STOP_BUDGET) and the backup before Docker kills it
+    stop_grace_period: 60s
     restart: unless-stopped
+    logging: *logs
+
+  studio:
+    build: ./desktop
+    image: gramalyzer-studio:local
+    init: true
+    environment:
+      GRAMALYZER_SERVER: ${STUDIO_SERVER:-http://gramalyzer:8080}
+      GRAMALYZER_API_TOKEN_FILE: /keys/api-token
+      # set a password if anything but this machine can reach port 6080
+      STUDIO_VNC_PASSWORD: ${STUDIO_VNC_PASSWORD:-}
+      STUDIO_SIZE: ${STUDIO_SIZE:-1440x900}
+    volumes:
+      - studio-data:/data
+      - gramalyzer-keys:/keys:ro
+    ports:
+      - "127.0.0.1:${STUDIO_PORT:-6080}:6080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:6080/vnc.html"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    stop_grace_period: 20s
+    restart: unless-stopped
+    logging: *logs
 
 volumes:
-  db-data:
+  gramalyzer-data:
+  gramalyzer-keys:
+  gramalyzer-backups:
+  studio-data:

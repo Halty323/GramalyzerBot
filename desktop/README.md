@@ -46,6 +46,14 @@ Settings are saved as JSON in the user's config folder, readable only by that us
 
 The `GRAMALYZER_STUDIO_CONFIG` variable points it at another file.
 
+**Opening and closing Studio refreshes every channel.** When it connects, Studio asks the server to bring every managed and watched channel up to date (`POST /api/refresh`) and reloads once the server is done; closing the window asks once more (for up to 4 seconds) before it exits. While the server is down Studio keeps retrying every 15 seconds and reconnects by itself.
+
+### In a container
+
+The repository root's `compose.yaml` runs Studio as its own container next to the server: `docker compose up -d --build studio`, then open http://localhost:6080. It draws on a virtual screen (no GPU needed) that noVNC shows in the browser, restarts Studio if it ever exits, and signs in with the token the server container shares (`GRAMALYZER_API_TOKEN_FILE`). Its settings live in the `studio-data` volume. `docker stop` asks the server for a last refresh, like closing the window. `STUDIO_SIZE` sets the screen (default `1440x900`), `STUDIO_VNC_PASSWORD` a password, `STUDIO_SERVER` another server.
+
+Standalone, against a server on the host: `docker build -t gramalyzer-studio desktop/ && docker run -p 127.0.0.1:6080:6080 -e GRAMALYZER_SERVER=http://host.docker.internal:8080 -e GRAMALYZER_API_TOKEN=… gramalyzer-studio`.
+
 ### Building for each platform
 
 ```sh

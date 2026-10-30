@@ -1,0 +1,35 @@
+# Runs the Gramalyzer container on PostgreSQL instead of the built-in H2 database, for a busy or public server:
+#
+#   docker compose -f compose.yaml -f compose.postgres.yaml up -d --build
+#
+# Set POSTGRES_PASSWORD in .env. Back it up with pg_dump (deploy/VPS.md); the built-in zip backups only cover H2.
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: gramalyzer
+      POSTGRES_USER: gramalyzer
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gramalyzer -d gramalyzer"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    # outlives the app's shutdown: the app's last refresh still writes to it
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  gramalyzer:
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/gramalyzer
+      SPRING_DATASOURCE_USERNAME: gramalyzer
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+
+volumes:
+  db-data:
