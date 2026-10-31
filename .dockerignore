@@ -7,3 +7,4 @@ target
 # Local configuration stays out of images; containers are configured through .env / environment variables
 src/main/resources/application.yml
 src/main/resources/application-local.yml
+desktop/target

@@ -189,6 +189,11 @@ public class TrackingService {
         return refresh(c, force, FRESH);
     }
 
+    /** Fetches the channel again unless it was read within {@code fresh}; never throws for a channel already known. */
+    public TrackedChannel refreshIfOlder(TrackedChannel c, Duration fresh) {
+        return refresh(c, false, fresh);
+    }
+
     private TrackedChannel refresh(TrackedChannel c, boolean force, Duration fresh) {
         if (c.isDemo()) return c;
         if (!force && c.getFetchedAt() != null && c.getFetchedAt().isAfter(Instant.now().minus(fresh)) && c.getLastError() == null) return c;

@@ -17,9 +17,9 @@ Any Linux VPS with **2 GB RAM**, 1–2 vCPU and 20 GB disk (Ubuntu 24.04 or Debi
    git clone https://github.com/Halty323/GramalyzerVibe.git
    cd GramalyzerBot
    ```
-5. `cp .env.example .env` and set at least `POSTGRES_PASSWORD`, `GRAMALYZER_API_TOKEN` (`openssl rand -hex 32`), `TELEGRAM_BOT_ENABLED=true`, `TELEGRAM_BOT_TOKEN`, `BOT_ADMINS`, and add `DOMAIN=your.domain`.
-6. Start it: `docker compose -f compose.yaml -f compose.vps.yaml up -d --build`. The first build takes several minutes.
-7. Open `https://your.domain` and sign in with the API token. `docker compose logs -f app` shows startup; if `BOT_ADMINS` is empty, look for the `/claim CODE` line.
+5. `cp .env.example .env` and set at least `POSTGRES_PASSWORD`, `GRAMALYZER_API_TOKEN` (`openssl rand -hex 32`; a public server should not rely on the generated one), `TELEGRAM_BOT_ENABLED=true`, `TELEGRAM_BOT_TOKEN`, `BOT_ADMINS`, and add `DOMAIN=your.domain`.
+6. Start it: `docker compose -f compose.yaml -f compose.postgres.yaml -f compose.vps.yaml up -d --build gramalyzer caddy`. The first build takes several minutes.
+7. Open `https://your.domain` and sign in with the API token. `docker compose logs -f gramalyzer` shows startup; if `BOT_ADMINS` is empty, look for the `/claim CODE` line.
 
 Paid plans in the bot (Telegram Stars) are on with this setup. Set `BILLING_ENABLED=false` in `.env` to give everyone unlimited use, or change the prices with `BILLING_CREATOR_STARS` / `BILLING_PRO_STARS`. Earned Stars show up in the bot's balance in Telegram; withdrawals go through Fragment (1,000 Stars minimum).
 
@@ -27,7 +27,7 @@ Paid plans in the bot (Telegram Stars) are on with this setup. Set `BILLING_ENAB
 
 ```
 git -C ../GramalyzerVibe pull && git pull
-docker compose -f compose.yaml -f compose.vps.yaml up -d --build
+docker compose -f compose.yaml -f compose.postgres.yaml -f compose.vps.yaml up -d --build gramalyzer caddy
 ```
 
 Flyway migrates the database on start.
@@ -42,8 +42,10 @@ docker compose exec -T db pg_dump -U gramalyzer gramalyzer | gzip > ~/gramalyzer
 
 Add it to cron and copy the files off the server now and then (or use the provider's snapshots).
 
+Studio isn't started on the server (it is a local app); run it on your computer against `https://your.domain` with the binaries or `docker compose up studio` and `STUDIO_SERVER=https://your.domain` plus the token in `.env`.
+
 ## Notes
 
 * Keep `.env` private; it holds the bot token and the API token.
-* The live PostgreSQL setup has not been run in production yet (see the README), so watch `docker compose logs app` after the first start.
+* The live PostgreSQL setup has not been run in production yet (see the README), so watch `docker compose logs gramalyzer` after the first start.
 * If the server is low on memory, add a 2 GB swap file.

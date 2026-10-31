@@ -372,3 +372,20 @@ pub struct TrackedDetail {
     #[serde(default)]
     pub posts: Vec<FeedPost>,
 }
+
+/// How the server's "refresh every channel" pass is going (`/api/refresh`).
+#[derive(Debug, Clone, Deserialize, PartialEq, Default)]
+#[serde(default)]
+pub struct RefreshStatus {
+    pub running: bool,
+    pub last: Option<RefreshRun>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct RefreshRun {
+    pub reason: String,
+    pub channels: u32,
+    pub refreshed: u32,
+    pub failed: u32,
+}
