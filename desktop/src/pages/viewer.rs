@@ -139,7 +139,7 @@ fn chat(app: &App) -> Element<'_, Message> {
         rtl,
         vec![
             figure(app.t("view.avg_views"), st.avg_views.map(|x| i.compact(x)).unwrap_or("—".into())).into(),
-            figure(app.t("view.er"), st.er.map(|x| i.percent(x, 1)).unwrap_or("—".into())).into(),
+            figure(app.t("view.err"), st.err.map(|x| i.percent(x, 1)).unwrap_or("—".into())).into(),
             figure(app.t("view.reaction_rate"), st.reaction_rate.map(|x| i.dec(x, 1)).unwrap_or("—".into())).into(),
             figure(app.t("view.per_day"), st.posts_per_day.map(|x| i.dec(x, 1)).unwrap_or("—".into())).into(),
             figure(app.t("view.last_post"), st.last_post.as_deref().and_then(local).map(|d| i.ago(&d)).unwrap_or("—".into())).into(),
@@ -228,7 +228,7 @@ fn local_stats(posts: &[FeedPost], subscribers: Option<i64>) -> TrackedStats {
     TrackedStats {
         subscribers,
         avg_views,
-        er: avg_views.zip(subscribers.filter(|s| *s > 0)).map(|(v, s)| v / s as f64 * 100.0),
+        err: avg_views.zip(subscribers.filter(|s| *s > 0)).map(|(v, s)| v / s as f64 * 100.0),
         avg_reactions: (!posts.is_empty()).then(|| posts.iter().map(|p| p.reactions).sum::<i64>() as f64 / posts.len() as f64),
         reaction_rate: (!viewed.is_empty() && viewed.iter().sum::<i64>() > 0).then(|| reactions as f64 / viewed.iter().sum::<i64>() as f64 * 100.0),
         posts_per_day: (posts.len() > 1).then(|| posts.len() as f64 / days),

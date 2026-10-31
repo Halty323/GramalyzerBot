@@ -34,7 +34,8 @@ class TrackedStatsTest {
                 post(3, Duration.ofHours(1), 50, 1, "fresh", "TEXT"));
         TrackedStats s = TrackedStats.of(10_000, posts, List.of(), NOW, ZoneOffset.UTC);
         assertThat(s.avgViews()).isEqualTo(2000);
-        assertThat(s.er()).isEqualTo(20.0);
+        assertThat(s.err()).isEqualTo(20.0);
+        assertThat(s.errBasis()).as("too few day-old posts: latest views").isEqualTo("latest");
         assertThat(s.reactionRate()).isEqualTo(1.0);
         assertThat(s.sample()).isEqualTo(2);
         assertThat(s.lastPost()).isEqualTo(NOW.minus(Duration.ofHours(1)));
@@ -42,6 +43,40 @@ class TrackedStatsTest {
         assertThat(s.top().get(0).getMessageId()).isEqualTo(2);
         assertThat(s.kinds()).extracting(TrackedStats.Share::kind).containsExactly("TEXT", "PHOTO");
         assertThat(s.postsPerDay()).isEqualTo(1.0);
+    }
+
+    @Test
+    void reachUsesViewsAtOneDayOnceThereAreEnough() {
+        List<TrackedPost> posts = new ArrayList<>();
+        for (int i = 0; i < 6; i++) {
+            TrackedPost p = post(i, Duration.ofDays(3 + i), 3000, 30, "post " + i, "TEXT");
+            p.setViews24h(1000);
+            posts.add(p);
+        }
+        TrackedStats s = TrackedStats.of(10_000, posts, List.of(), NOW, ZoneOffset.UTC);
+        assertThat(s.err()).as("old posts keep gaining views: compare them at the same age").isEqualTo(10.0);
+        assertThat(s.errBasis()).isEqualTo("24h");
+        assertThat(s.avgViews()).isEqualTo(3000);
+    }
+
+    @Test
+    void flagsAreHintsForBuyers() {
+        List<TrackedPost> flat = new ArrayList<>();
+        for (int i = 0; i < 12; i++) flat.add(post(i, Duration.ofDays(1 + i), 1000 + i, 0, "x", "TEXT"));
+        assertThat(TrackedStats.flags(100_000, 0.5, flat, List.of())).containsExactly("LOW_REACH", "FLAT_VIEWS");
+
+        List<TrackedPost> lively = new ArrayList<>();
+        for (int i = 0; i < 12; i++) lively.add(post(i, Duration.ofDays(1 + i), 500 + i * 300, 0, "x", "TEXT"));
+        assertThat(TrackedStats.flags(5_000, 15.0, lively, List.of())).isEmpty();
+
+        LocalDate today = NOW.atZone(ZoneOffset.UTC).toLocalDate();
+        TrackedSnapshot a = new TrackedSnapshot(1L, today.minusDays(1));
+        a.setSubscribers(5_000);
+        a.setAvgViews(800);
+        TrackedSnapshot b = new TrackedSnapshot(1L, today);
+        b.setSubscribers(9_000);
+        b.setAvgViews(790);
+        assertThat(TrackedStats.flags(9_000, 15.0, lively, List.of(a, b))).containsExactly("SUBSCRIBER_JUMP");
     }
 
     @Test

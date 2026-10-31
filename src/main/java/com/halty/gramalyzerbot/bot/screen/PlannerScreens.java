@@ -1,5 +1,6 @@
 package com.halty.gramalyzerbot.bot.screen;
 
+import com.halty.gramalyzerbot.analytics.PostModel;
 import com.halty.gramalyzerbot.analytics.TextFeatures;
 import com.halty.gramalyzerbot.bot.ui.*;
 import com.halty.gramalyzerbot.channel.Channel;
@@ -12,7 +13,6 @@ import com.halty.gramalyzerbot.planner.PlannerService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
-import java.time.DayOfWeek;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -32,9 +32,15 @@ public class PlannerScreens {
         View v = new View();
         if (r.status().equals("learning")) {
             v.line(Tr.t("draft.title_learning")).line(Tr.t("draft.learning", r.postsRead()));
+        } else if (r.status().equals("unproven")) {
+            v.line(Tr.t("draft.title_learning"))
+                    .line(r.check().tested() == 0 ? Tr.t("draft.untested") : Tr.t("draft.unproven", r.check().tested()))
+                    .blank();
+            for (Factor f : r.factors()) v.line(line(f, ch));
         } else {
             v.line(Tr.t("draft.title", r.score())).line(Fmt.progress(r.score(), 100, 10))
                     .line(Tr.t("draft.expected", Fmt.lift(r.expected())) + (r.potential() > r.expected() + 0.05 ? " · " + Tr.t("draft.potential", Fmt.lift(r.potential())) : ""))
+                    .line("<i>" + Tr.t("draft.proven", r.check().tested()) + "</i>")
                     .blank();
             for (Factor f : r.factors()) v.line(line(f, ch));
         }
@@ -51,18 +57,19 @@ public class PlannerScreens {
             case FORMAT -> Labels.kind(f.key());
             case LENGTH -> "📏 " + Labels.length(f.key());
             case LINK -> "🔗 " + Labels.link(f.key());
-            case TIME -> "🕓 " + slot(f.key());
-            case HASHTAGS -> f.key().isEmpty() ? "#️⃣ " + Tr.t("draft.no_hashtags") : "#️⃣ " + Fmt.esc(f.key());
+            case TIME -> "🕓 " + block(f.key());
+            case TOPIC -> "🏷 " + Fmt.esc(f.key());
             case KEYWORDS -> "💬 " + Fmt.esc(f.key());
         };
-        String icon = f.weak() ? "⚠️" : f.lift() >= 1.05 ? "✅" : "▫️";
-        String out = icon + " " + what + (f.key().isEmpty() ? "" : " — " + Fmt.lift(f.lift()));
+        String icon = !f.counted() ? "▫️" : f.weak() ? "⚠️" : f.low() > 1 ? "✅" : "▫️";
+        String out = icon + " " + what + " — " + Fmt.lift(f.lift()) + " <i>(" + Fmt.lift(f.low()) + "–" + Fmt.lift(f.high()) + ")</i>"
+                + (f.counted() ? "" : " <i>" + Tr.t("draft.context") + "</i>");
         if (f.weak()) {
             String better = switch (f.dimension()) {
                 case FORMAT -> Labels.kindName(f.bestKey());
                 case LENGTH -> Labels.length(f.bestKey());
                 case LINK -> Labels.link(f.bestKey());
-                case TIME -> slot(f.bestKey());
+                case TIME -> block(f.bestKey());
                 default -> Fmt.esc(f.bestKey());
             };
             out += "\n     " + Tr.t("draft.better", better, Fmt.lift(f.bestLift()));
@@ -70,9 +77,10 @@ public class PlannerScreens {
         return out;
     }
 
-    private static String slot(String key) {
-        String[] dh = key.split(" ");
-        return Fmt.dayShort(DayOfWeek.valueOf(dh[0])) + " " + Fmt.hour(Integer.parseInt(dh[1]));
+    /** "16" → "16:00–20:00", a 4-hour block of the day. */
+    static String block(String key) {
+        int from = Integer.parseInt(key);
+        return Fmt.hour(from) + "–" + Fmt.hour((from + PostModel.BLOCK_HOURS) % 24);
     }
 
     public View evergreen(Channel ch, Role role) {

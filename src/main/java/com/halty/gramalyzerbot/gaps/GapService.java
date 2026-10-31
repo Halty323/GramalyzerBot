@@ -1,6 +1,7 @@
 package com.halty.gramalyzerbot.gaps;
 
 import com.halty.gramalyzerbot.analytics.AnalysisEngine;
+import com.halty.gramalyzerbot.analytics.Baseline;
 import com.halty.gramalyzerbot.analytics.Sample;
 import com.halty.gramalyzerbot.analytics.TextFeatures;
 import com.halty.gramalyzerbot.channel.Channel;
@@ -24,16 +25,18 @@ import java.util.stream.Collectors;
  * Where watched channels win and the user's channel doesn't: formats, posting hours, lengths and topics that do well
  * above their usual for competitors, but that the user rarely posts or that don't work as well for them.
  * <p>
- * Channels of different sizes can't be compared by raw views, so each post is scored against its own channel's
- * median ("lift", 1.0 = a typical post there). Competitors are scored by views; the user's channel by views when the
- * public page shows them, otherwise by reactions and comments.
+ * Channels of different sizes can't be compared by raw views, so each post is scored against the posts around it in
+ * its own channel ("lift", 1.0 = a typical post there at the time): a channel's growth or a slow month doesn't turn
+ * into a finding. Competitors are scored by views at about a day old where those were seen, since a post's latest
+ * count keeps growing for weeks; the user's channel by views when the public page shows them, otherwise by reactions
+ * and comments. Sponsored posts are left out on both sides.
  */
 @Service
 @RequiredArgsConstructor
 public class GapService {
 
     /** Posts this fresh are still collecting views and reactions. */
-    static final Duration SETTLED = Duration.ofHours(12);
+    static final Duration SETTLED = Duration.ofHours(24);
     static final Duration LOOK_BACK = Duration.ofDays(60);
     static final int PER_RIVAL = 200;
     static final int MIN_THEIRS = 15;
@@ -70,7 +73,7 @@ public class GapService {
     /** @param channel the competitor's username */
     public record Example(String channel, String preview, String url, double lift) {}
 
-    public record Rival(String username, String title, Integer subscribers, Integer avgViews, Double er, Double postsPerDay,
+    public record Rival(String username, String title, Integer subscribers, Integer avgViews, Double err, Double postsPerDay,
                         String topFormat, int posts) {}
 
     public record You(String title, Integer subscribers, Double postsPerDay, String topFormat, int posts) {}
@@ -103,7 +106,7 @@ public class GapService {
 
     Report compare(Channel ch, List<Sample> samples, Map<TrackedChannel, List<TrackedPost>> rivals, Instant now) {
         ZoneId zone = ch.zone();
-        List<Sample> settled = samples.stream().filter(s -> !s.excluded() && s.postedAt().isBefore(now.minus(SETTLED))).toList();
+        List<Sample> settled = samples.stream().filter(s -> !s.excluded() && !TextFeatures.isAd(s.text()) && s.postedAt().isBefore(now.minus(SETTLED))).toList();
         long withViews = settled.stream().filter(s -> s.views() != null).count();
         boolean byViews = !settled.isEmpty() && withViews >= settled.size() * 0.7;
         List<Item> yours = lifted(settled.stream().filter(s -> !byViews || s.views() != null).map(s -> new Item(YOU, s.kind().name(), s.postedAt(),
@@ -118,12 +121,15 @@ public class GapService {
             TrackedChannel c = e.getKey();
             List<TrackedPost> list = e.getValue();
             TrackedStats stats = TrackedStats.of(c.getSubscribers(), list, List.of(), now, zone);
-            summaries.add(new Rival(c.getUsername(), c.getTitle(), c.getSubscribers(), stats.avgViews(), stats.er(), stats.postsPerDay(),
+            summaries.add(new Rival(c.getUsername(), c.getTitle(), c.getSubscribers(), stats.avgViews(), stats.err(), stats.postsPerDay(),
                     stats.kinds().isEmpty() ? null : stats.kinds().getFirst().kind(), list.size()));
-            theirs.addAll(lifted(list.stream()
-                    .filter(p -> p.getViews() != null && p.getForwardedFrom() == null && p.getPostedAt().isBefore(now.minus(SETTLED)))
+            List<TrackedPost> usable = list.stream()
+                    .filter(p -> p.getViews() != null && p.getForwardedFrom() == null && !TextFeatures.isAd(p.getBody()) && p.getPostedAt().isBefore(now.minus(SETTLED)))
+                    .toList();
+            boolean dayOld = !usable.isEmpty() && usable.stream().filter(p -> p.getViews24h() != null).count() >= usable.size() * 0.7;
+            theirs.addAll(lifted(usable.stream().filter(p -> !dayOld || p.getViews24h() != null)
                     .map(p -> new Item(c.getUsername(), p.getKind(), p.getPostedAt(), p.getBody() == null ? 0 : p.getBody().codePointCount(0, p.getBody().length()),
-                            topics(p.getBody()), p.getViews(), preview(p.getBody()), Links.post(0, c.getUsername(), c.isDemo(), p.getMessageId())))
+                            topics(p.getBody()), dayOld ? p.getViews24h() : p.getViews(), preview(p.getBody()), Links.post(0, c.getUsername(), c.isDemo(), p.getMessageId())))
                     .toList()));
         }
         String measure = byViews ? "VIEWS" : "ENGAGEMENT";
@@ -234,15 +240,20 @@ public class GapService {
 
     // ------------------------------------------------------------------ posts
 
-    /** Each post's value over its channel's median, capped. */
+    /**
+     * Each post's value over the median of the posts around it in its channel, capped. Neighbours are also about the
+     * same age, which matters for competitors whose posts were read once at very different ages.
+     */
     private static List<Item> lifted(List<Item> items) {
         Map<String, List<Item>> byChannel = items.stream().collect(Collectors.groupingBy(Item::channel));
         List<Item> out = new ArrayList<>();
-        for (List<Item> list : byChannel.values()) {
-            double[] values = list.stream().mapToDouble(Item::value).sorted().toArray();
-            double median = values.length % 2 == 1 ? values[values.length / 2] : (values[values.length / 2 - 1] + values[values.length / 2]) / 2;
-            for (Item i : list) out.add(new Item(i.channel(), i.kind(), i.at(), i.length(), i.topics(),
-                    Math.min(CAP, (i.value() + 1) / (median + 1)), i.preview(), i.url()));
+        for (List<Item> unsorted : byChannel.values()) {
+            List<Item> list = unsorted.stream().sorted(Comparator.comparing(Item::at)).toList();
+            double[] ratios = Baseline.ratios(list.stream().mapToDouble(Item::value).toArray());
+            for (int k = 0; k < list.size(); k++) {
+                Item i = list.get(k);
+                out.add(new Item(i.channel(), i.kind(), i.at(), i.length(), i.topics(), Math.min(CAP, ratios[k]), i.preview(), i.url()));
+            }
         }
         return out;
     }

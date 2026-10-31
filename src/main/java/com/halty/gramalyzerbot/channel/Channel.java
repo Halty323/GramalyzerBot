@@ -41,7 +41,7 @@ public class Channel {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    private Metric metric = Metric.ENGAGEMENT;
+    private Metric metric = Metric.AUTO;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "digest_day", nullable = false)

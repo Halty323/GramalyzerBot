@@ -6,6 +6,7 @@ import com.halty.gramalyzerbot.channel.Channel;
 import com.halty.gramalyzerbot.channel.Permission;
 import com.halty.gramalyzerbot.channel.Role;
 import com.halty.gramalyzerbot.channel.SubscriberService;
+import com.halty.gramalyzerbot.growth.CitationService;
 import com.halty.gramalyzerbot.growth.GrowthService;
 import com.halty.gramalyzerbot.growth.GrowthService.LinkStat;
 import com.halty.gramalyzerbot.growth.GrowthService.PostEffect;
@@ -32,6 +33,7 @@ public class GrowthScreens {
 
     private final SubscriberService subscribers;
     private final GrowthService growth;
+    private final CitationService citations;
     private final BillingService billing;
     private final PlanScreens plans;
 
@@ -61,6 +63,20 @@ public class GrowthScreens {
             effects(v, Tr.t("growth.gainers"), r.gainers(), ch);
             effects(v, Tr.t("growth.losers"), r.losers(), ch);
             if (!r.losers().isEmpty()) v.line("<i>" + Tr.t("growth.losers_hint") + "</i>");
+            if (!r.formats().isEmpty()) {
+                v.blank().line(Tr.t("growth.formats"));
+                for (GrowthService.FormatEffect f : r.formats())
+                    v.line("• " + Labels.kind(f.kind()) + " – " + Tr.t("growth.format_line", (f.net() >= 0 ? "+" : "") + Fmt.one(f.net()), Fmt.one(f.joined()), Fmt.one(f.left()))
+                            + " · " + Tr.n("n.posts", f.posts()));
+            }
+        }
+        List<CitationService.Citation> cited = citations.citations(ch);
+        if (!cited.isEmpty()) {
+            v.blank().line(Tr.t("growth.citations"));
+            for (CitationService.Citation c : cited.subList(0, Math.min(5, cited.size()))) {
+                String name = "<a href=\"" + c.url() + "\">" + Fmt.esc(c.title()) + "</a>";
+                v.line("• " + name + " – " + Tr.t("growth.citation_line", c.forwards(), c.mentions()) + " · " + Fmt.date(c.last()));
+            }
         }
 
         long id = ch.getId();
@@ -104,6 +120,8 @@ public class GrowthScreens {
                 if (l.cost() != null) line += " · " + Tr.t("promo.cost", money(l.cost(), l.currency()),
                         l.costPerSubscriber() == null ? "–" : money(l.costPerSubscriber(), l.currency()));
                 v.line(line);
+                if (l.kept7() != null)
+                    v.line("     " + Tr.t("promo.kept", Math.round(l.kept7() * 100) + "%", l.kept30() == null ? "–" : Math.round(l.kept30() * 100) + "%"));
                 if (manage && !l.revoked()) revoke.add(Btn.cb("🗑 " + (i + 1), Cb.of("pr:rv", id, l.id())));
             }
             for (int i = 0; i < revoke.size(); i += 4) v.row(revoke.subList(i, Math.min(i + 4, revoke.size())).toArray(new Btn[0]));

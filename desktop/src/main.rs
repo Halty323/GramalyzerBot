@@ -31,8 +31,24 @@ fn main() -> iced::Result {
         .font(include_bytes!("../assets/fonts/NotoSansDevanagari_600SemiBold.ttf").as_slice())
         .font(include_bytes!("../assets/fonts/lucide.ttf").as_slice())
         .default_font(ui::INTER)
-        .window_size((1440.0, 900.0))
-        .window(iced::window::Settings { min_size: Some(iced::Size::new(1180.0, 720.0)), ..Default::default() })
+        .window(iced::window::Settings {
+            size: window_size(),
+            min_size: Some(iced::Size::new(1180.0, 720.0)),
+            // closing asks the server for one last channel refresh first (App::update, Message::CloseRequested)
+            exit_on_close_request: false,
+            ..Default::default()
+        })
         .antialiasing(true)
         .run()
+}
+
+/// 1440×900, or `GRAMALYZER_STUDIO_SIZE` ("1920x1080"), which the Docker image sets to its virtual screen.
+fn window_size() -> iced::Size {
+    std::env::var("GRAMALYZER_STUDIO_SIZE")
+        .ok()
+        .and_then(|s| {
+            let (w, h) = s.split_once('x')?;
+            Some(iced::Size::new(w.trim().parse::<f32>().ok()?.max(1180.0), h.trim().parse::<f32>().ok()?.max(720.0)))
+        })
+        .unwrap_or(iced::Size::new(1440.0, 900.0))
 }

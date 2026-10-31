@@ -23,9 +23,14 @@ public class SearchCheckScreens {
         SearchCheck.Result r = search.check(ch);
         View v = new View().line(Tr.t("seo.title")).line("<i>" + Fmt.esc(ch.getTitle()) + "</i>").blank()
                 .line(Tr.t("seo.score", r.score(), Tr.t("seo.grade." + r.grade())))
-                .line(Fmt.progress(r.score(), 100, 10)).blank();
+                .line(Fmt.progress(r.score(), 100, 10));
+        String group = null;
         for (SearchCheck.Check c : r.checks()) {
             if (r.username() == null && c.id().startsWith("username_")) continue; // "make it public" already says it
+            if (!c.group().equals(group)) {
+                group = c.group();
+                v.blank().line(Tr.t("seo.group." + group, group.equals("find") ? r.find() : r.join()));
+            }
             String icon = switch (c.status()) { case OK -> "✅"; case WARN -> "⚠️"; case BAD -> "❌"; };
             String words = c.words().stream().map(w -> "«" + Fmt.esc(w) + "»").collect(Collectors.joining(", "));
             v.line(icon + " " + Tr.t("seo." + c.id() + "." + c.status().name().toLowerCase(Locale.ROOT), words));
@@ -42,7 +47,16 @@ public class SearchCheckScreens {
             v.blank().line(Tr.t("seo.username_ideas"));
             v.line(r.usernameIdeas().stream().map(u -> "<code>@" + Fmt.esc(u) + "</code>").collect(Collectors.joining(" · ")));
         }
-        v.blank().line("<i>" + Tr.t("seo.legend") + "</i>");
+        if (!r.positions().isEmpty()) {
+            v.blank().line(Tr.t("seo.positions"));
+            for (SearchCheck.Position p : r.positions()) {
+                String now = p.position() == null ? Tr.t("seo.position.none") : "#" + p.position();
+                String before = p.previous() == null ? "" : " <i>(" + Tr.t("seo.position.before", "#" + p.previous()) + ")</i>";
+                v.line("• «" + Fmt.esc(p.word()) + "» " + now + before + " · " + Fmt.date(p.checkedAt()));
+            }
+        }
+        v.blank().line(Tr.t("seo.notes"));
+        for (String n : r.notes()) v.line("• " + Tr.t("seo.note." + n));
         return v.row(Btn.cb(Tr.t("btn.refresh"), Cb.of("seo:show", id)), Btn.cb(Tr.t("btn.dashboard"), Cb.of("nav:home", id)));
     }
 }

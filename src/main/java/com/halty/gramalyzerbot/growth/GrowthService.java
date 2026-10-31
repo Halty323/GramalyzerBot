@@ -56,9 +56,19 @@ public class GrowthService {
         public int net() { return joined - left; }
     }
 
-    /** One promo link, over its whole life. {@code stayed} joined through it and haven't left. */
+    /**
+     * One promo link, over its whole life. {@code stayed} joined through it and haven't left. {@code kept7} and
+     * {@code kept30} are the shares still there 7 and 30 days after joining, of the people who joined that long ago
+     * (null until anyone has): bought or uninterested audiences leave within days, which a join count never shows.
+     * {@code costPerSubscriber} divides the cost by those who stayed.
+     */
     public record LinkStat(long id, String name, String url, Double cost, String currency, Instant createdAt, boolean revoked,
-                           int joined, int left, int stayed, Double costPerSubscriber) {}
+                           int joined, int left, int stayed, Double costPerSubscriber, Double kept7, Double kept30) {}
+
+    /** How many subscribers posts of one format bring on average: organic joins minus leaves while each was the newest. */
+    public record FormatEffect(String kind, int posts, double joined, double left) {
+        public double net() { return Math.round((joined - left) * 10) / 10.0; }
+    }
 
     /**
      * @param tracking  whether any join or leave has been seen; false right after connecting, or when the bot isn't an admin
@@ -66,7 +76,7 @@ public class GrowthService {
      * @param fromLinks of {@code joined}, how many came through promo links
      */
     public record Report(boolean tracking, Instant since, int days, int joined, int left, int fromLinks, List<Day> daily,
-                         List<PostEffect> gainers, List<PostEffect> losers, List<LinkStat> links) {
+                         List<PostEffect> gainers, List<PostEffect> losers, List<LinkStat> links, List<FormatEffect> formats) {
         public int net() { return joined - left; }
     }
 
@@ -195,7 +205,17 @@ public class GrowthService {
         List<PostEffect> losers = effects.stream().filter(p -> p.left() > p.joined() && p.left() >= 2)
                 .sorted(Comparator.comparingInt(PostEffect::net).thenComparing(PostEffect::postedAt, Comparator.reverseOrder()))
                 .limit(5).toList();
-        return new Report(since != null, since, days, joined, left, fromLinks, daily, gainers, losers, linkStats(ch));
+        return new Report(since != null, since, days, joined, left, fromLinks, daily, gainers, losers, linkStats(ch), formats(effects));
+    }
+
+    /** Formats with at least three posts, the one bringing the most subscribers first. */
+    static List<FormatEffect> formats(List<PostEffect> effects) {
+        Map<String, List<PostEffect>> byKind = effects.stream().collect(Collectors.groupingBy(PostEffect::kind));
+        return byKind.entrySet().stream().filter(e -> e.getValue().size() >= 3)
+                .map(e -> new FormatEffect(e.getKey(), e.getValue().size(),
+                        Math.round(e.getValue().stream().mapToInt(PostEffect::joined).average().orElse(0) * 10) / 10.0,
+                        Math.round(e.getValue().stream().mapToInt(PostEffect::left).average().orElse(0) * 10) / 10.0))
+                .sorted(Comparator.comparingDouble(FormatEffect::net).reversed()).toList();
     }
 
     /** Each post, from its time until the next post (at most a day), with the organic joins and the leaves in between. */
@@ -242,9 +262,14 @@ public class GrowthService {
         // who left after joining through a link: their latest event is a leave
         Set<Long> members = joinsByLink.values().stream().flatMap(List::stream).map(MemberEvent::getMember).collect(Collectors.toSet());
         Map<Long, MemberEvent> latest = new HashMap<>();
+        Map<Long, List<MemberEvent>> history = new HashMap<>();
         if (!members.isEmpty()) {
-            for (MemberEvent e : events.findAllByChannelIdAndMemberInOrderByAtAsc(ch.getId(), members)) latest.put(e.getMember(), e);
+            for (MemberEvent e : events.findAllByChannelIdAndMemberInOrderByAtAsc(ch.getId(), members)) {
+                latest.put(e.getMember(), e);
+                history.computeIfAbsent(e.getMember(), k -> new ArrayList<>()).add(e);
+            }
         }
+        Instant now = Instant.now();
         List<LinkStat> out = new ArrayList<>();
         for (PromoLink l : all) {
             List<MemberEvent> joins = joinsByLink.getOrDefault(l.getId(), List.of());
@@ -253,9 +278,25 @@ public class GrowthService {
             int stayed = people.size() - left;
             Double perSub = l.getCost() == null || stayed == 0 ? null : Math.round(l.getCost() / stayed * 100) / 100.0;
             out.add(new LinkStat(l.getId(), l.getName(), l.getUrl(), l.getCost(), l.getCurrency(), l.getCreatedAt(),
-                    l.getRevokedAt() != null, people.size(), left, stayed, perSub));
+                    l.getRevokedAt() != null, people.size(), left, stayed, perSub,
+                    kept(joins, history, Duration.ofDays(7), now), kept(joins, history, Duration.ofDays(30), now)));
         }
         return out;
+    }
+
+    /** Of the people who joined through a link at least {@code after} ago, the share who hadn't left {@code after} later. */
+    static Double kept(List<MemberEvent> joins, Map<Long, List<MemberEvent>> history, Duration after, Instant now) {
+        int eligible = 0, kept = 0;
+        Set<Long> seen = new HashSet<>();
+        for (MemberEvent j : joins) {
+            if (!seen.add(j.getMember()) || j.getAt().plus(after).isAfter(now)) continue;
+            eligible++;
+            Instant until = j.getAt().plus(after);
+            boolean gone = history.getOrDefault(j.getMember(), List.of()).stream()
+                    .anyMatch(e -> !e.isJoined() && !e.getAt().isBefore(j.getAt()) && e.getAt().isBefore(until));
+            if (!gone) kept++;
+        }
+        return eligible == 0 ? null : Math.round(kept * 1000.0 / eligible) / 1000.0;
     }
 
     // ------------------------------------------------------------------ demo

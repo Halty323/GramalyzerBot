@@ -28,6 +28,17 @@ public class SearchCheckController {
         return search.check(crm, insights.analyticsChannel(crm));
     }
 
+    public record PositionInput(String word, Integer position) {}
+
+    /** Notes where the channel showed up in Telegram's search for a word; the analytics channel must be connected. */
+    @PostMapping("/api/channels/{id}/search-check/positions")
+    public java.util.List<SearchCheck.Position> note(@PathVariable String id, @RequestBody PositionInput in) {
+        Models.Channel crm = workspace.channel(id);
+        var ch = insights.analyticsChannel(crm)
+                .orElseThrow(() -> new WorkspaceService.Problem(409, "Connect the bot to this channel to keep search notes."));
+        return search.note(ch, in.word(), in.position());
+    }
+
     @RestControllerAdvice(assignableTypes = SearchCheckController.class)
     static class Errors {
         @ExceptionHandler(WorkspaceService.Problem.class)

@@ -33,6 +33,14 @@ impl Default for Config {
     }
 }
 
+/// The token in `GRAMALYZER_API_TOKEN_FILE`, where the Docker setup shares it with Studio. The server writes it on its
+/// first start, which may come after Studio's, so the app reads it again while it can't sign in.
+pub fn token_from_file() -> Option<String> {
+    let path = std::env::var("GRAMALYZER_API_TOKEN_FILE").ok()?;
+    let token = std::fs::read_to_string(path).ok()?.trim().to_string();
+    (!token.is_empty()).then_some(token)
+}
+
 fn path() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("GRAMALYZER_STUDIO_CONFIG") {
         return Some(PathBuf::from(p));
@@ -48,6 +56,8 @@ impl Config {
             config.server = s;
         }
         if let Ok(t) = std::env::var("GRAMALYZER_API_TOKEN") {
+            config.token = t;
+        } else if let Some(t) = token_from_file() {
             config.token = t;
         }
         config

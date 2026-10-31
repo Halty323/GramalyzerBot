@@ -21,7 +21,9 @@ import java.util.function.Function;
  * <p>
  * The Bot API has no view counts, so they come from a public channel's web preview. Each post keeps its views 1, 6 and
  * 24 hours after posting ("marks"), filled in from the readings either side of a mark. The usual pace is the median of
- * the channel's recent posts at each mark.
+ * the channel's recent posts at each mark. A post judged against that pace is compared at 1 and 6 hours with posts from
+ * the same part of the day when there are enough of them: a post at 23:00 is read by few people in its first hour,
+ * which says nothing about the post.
  */
 @Service
 @RequiredArgsConstructor
@@ -148,11 +150,23 @@ public class ViewSpeedService {
 
     // ------------------------------------------------------------------ pace and report
 
-    /** The median views at each mark over the channel's recent posts, leaving {@code except} out. */
+    /**
+     * The median views at each mark over the channel's recent posts, leaving {@code except} out. With {@code except},
+     * the 1- and 6-hour marks use posts from its part of the day (night, morning, afternoon, evening) when at least
+     * {@value #MIN_HISTORY} have readings there.
+     */
     public Pace pace(Channel ch, Post except) {
         List<Post> recent = posts.findTop60ByChannelIdAndViews1hNotNullOrderByPostedAtDesc(ch.getId());
-        return new Pace(median(recent, Mark.H1, except), median(recent, Mark.H6, except), median(recent, Mark.H24, except));
+        if (except == null) return new Pace(median(recent, Mark.H1, null), median(recent, Mark.H6, null), median(recent, Mark.H24, null));
+        int part = dayPart(except, ch);
+        List<Post> same = recent.stream().filter(p -> dayPart(p, ch) == part).toList();
+        Integer h1 = median(same, Mark.H1, except), h6 = median(same, Mark.H6, except);
+        return new Pace(h1 != null ? h1 : median(recent, Mark.H1, except), h6 != null ? h6 : median(recent, Mark.H6, except),
+                median(recent, Mark.H24, except));
     }
+
+    /** 0 = night (0–6), 1 = morning, 2 = afternoon, 3 = evening, in the channel's time zone. */
+    static int dayPart(Post p, Channel ch) { return p.getPostedAt().atZone(ch.zone()).getHour() / 6; }
 
     private static Integer median(List<Post> recent, Mark m, Post except) {
         List<Integer> vals = new ArrayList<>();
@@ -203,7 +217,7 @@ public class ViewSpeedService {
 
     // ------------------------------------------------------------------ demo
 
-    /** Gives a sample channel's posts views at each mark the first time it's looked at, the newest one lagging. */
+    /** Gives a sample channel's posts views at each mark the first time it's looked at, the newest one past its first hour lagging. */
     private void ensureDemo(Channel ch) {
         List<Post> all = posts.findTop40ByChannelIdOrderByPostedAtDesc(ch.getId());
         if (all.isEmpty() || all.stream().anyMatch(p -> p.getViews() != null)) return;
@@ -211,10 +225,13 @@ public class ViewSpeedService {
         Random rng = new Random(ch.getTelegramChatId());
         int subs = ch.getSubscribers() == null ? 5_000 : ch.getSubscribers();
         List<Post> rows = new ArrayList<>();
+        // the newest post may be minutes old, with nothing to judge yet: the lagging one is the newest past its first hour
+        int lagging = 0;
+        while (lagging < all.size() - 1 && Duration.between(all.get(lagging).getPostedAt(), now).toMinutes() < 60) lagging++;
         for (int i = 0; i < all.size(); i++) {
             Post p = all.get(i);
             double day = subs * (0.22 + p.getReactions() / (double) Math.max(1, subs) * 6) * (0.8 + rng.nextDouble() * 0.4);
-            if (i == 0) day *= 0.4; // the newest post is falling behind
+            if (i == lagging) day *= 0.4;
             long ageMin = Duration.between(p.getPostedAt(), now).toMinutes();
             int h1 = (int) (day * 0.34), h6 = (int) (day * 0.72), h24 = (int) day;
             if (ageMin >= 60) p.setViews1h(h1);
@@ -224,7 +241,7 @@ public class ViewSpeedService {
                     : ageMin >= 60 ? 0.34 + 0.38 * (ageMin - 60) / 300.0 : 0.34 * ageMin / 60.0;
             p.setViews((int) (day * share));
             p.setViewsCheckedAt(now);
-            if (i == 0 && ageMin >= 60) p.setPaceAlert("LAG");
+            if (i == lagging && ageMin >= 60) p.setPaceAlert("LAG");
             rows.add(p);
         }
         posts.saveAll(rows);

@@ -1,6 +1,9 @@
 package com.halty.gramalyzerbot.planner;
 
+import com.halty.gramalyzerbot.analytics.Baseline;
+import com.halty.gramalyzerbot.analytics.Metric;
 import com.halty.gramalyzerbot.analytics.PostKind;
+import com.halty.gramalyzerbot.analytics.TextFeatures;
 import com.halty.gramalyzerbot.analytics.Report;
 import com.halty.gramalyzerbot.analytics.Sample;
 import com.halty.gramalyzerbot.channel.Channel;
@@ -20,8 +23,12 @@ import java.util.*;
 /**
  * Puts the queue on the channel's best times: the next free good slots, drafts spread over them in one go, and the
  * channel's best old posts offered again as evergreen reposts. Slots come from the analysis (the best weekday/hour
- * cells); a slot is free when no queued post is within {@value #GAP_HOURS} hours and the day doesn't already have as
- * many posts as the channel usually publishes in a day.
+ * cells, or 4-hour blocks for young channels); a slot is free when no queued post is within {@value #GAP_HOURS} hours
+ * and the day doesn't already have as many posts as the channel usually publishes in a day.
+ * <p>
+ * Without enough posts to know, there is no "best" time: generic advice ("post at 9, 13 and 18") has no data behind
+ * it. Instead the slots rotate through morning, afternoon and evening, one a day, so a couple of weeks of posting
+ * teaches the analysis what this channel's readers do. Such slots are marked {@code guess}.
  */
 @Service
 @RequiredArgsConstructor
@@ -32,13 +39,17 @@ public class PlannerService {
     static final Duration EARLIEST = Duration.ofMinutes(30);
     /** How much a slot's lift is discounted per day ahead when picking the next free slots. */
     static final double SOONER = 0.03;
-    /** Posts younger than this are too fresh to repeat, and a repost isn't offered again for as long. */
+    /**
+     * Posts younger than this are too fresh to repeat, and a repost isn't offered again for as long. Whether reposting
+     * works is itself unproven, so the screens present it as something to try and measure.
+     */
     static final Duration EVERGREEN_AGE = Duration.ofDays(90);
     static final double EVERGREEN_LIFT = 1.3;
     static final int EVERGREEN_SHOWN = 6;
-    private static final int[] FALLBACK_HOURS = {9, 13, 18};
+    /** Morning, afternoon and evening, taken in turn day by day while the channel's best times are still unknown. */
+    private static final int[] ROTATION = {9, 14, 19};
 
-    /** @param guess true when the channel has too few posts to know its best times, so the slot is a common default */
+    /** @param guess true when the channel has too few posts to know its best times, so the slot is part of a rotation to learn them */
     public record Slot(Instant at, double lift, boolean guess) {}
 
     public record Assignment(String postId, String title, Instant at, double lift) {}
@@ -88,9 +99,7 @@ public class PlannerService {
     static List<Slot> free(Report r, ZoneId zone, List<Instant> taken, Instant now, int count) {
         Map<String, Double> cells = new LinkedHashMap<>();
         boolean guess = !r.hasSignal() || r.topSlots().isEmpty();
-        if (guess) {
-            for (DayOfWeek d : DayOfWeek.values()) for (int h : FALLBACK_HOURS) cells.put(d + " " + h, 1.0);
-        } else {
+        if (!guess) {
             for (Report.Slot s : r.topSlots()) cells.put(s.day() + " " + s.hour(), s.lift());
             r.bestPerDay().values().forEach(list -> list.forEach(s -> cells.putIfAbsent(s.day() + " " + s.hour(), s.lift())));
         }
@@ -98,6 +107,12 @@ public class PlannerService {
         LocalDate today = now.atZone(zone).toLocalDate();
         for (int i = 0; i <= HORIZON_DAYS; i++) {
             LocalDate date = today.plusDays(i);
+            if (guess) {
+                // the epoch day keeps the rotation stable from one look to the next
+                Instant at = date.atTime(ROTATION[(int) Math.floorMod(date.toEpochDay(), ROTATION.length)], 0).atZone(zone).toInstant();
+                if (at.isAfter(now.plus(EARLIEST))) candidates.add(new Slot(at, 1.0, true));
+                continue;
+            }
             for (var e : cells.entrySet()) {
                 String[] dh = e.getKey().split(" ");
                 if (DayOfWeek.valueOf(dh[0]) != date.getDayOfWeek()) continue;
@@ -148,13 +163,20 @@ public class PlannerService {
 
     // ------------------------------------------------------------------ evergreen
 
-    /** The channel's best posts from at least three months ago, by how far they beat its median post. */
+    /**
+     * The channel's best posts from at least three months ago, by how far they beat the posts around them: a post from
+     * when the channel was twice as big isn't "evergreen" just because more people saw it then.
+     */
     public List<Evergreen> evergreen(Channel ch, String crmId) {
         Instant now = Instant.now();
-        List<Sample> all = analysis.samples(ch).stream().filter(s -> !s.excluded() && ch.getMetric().scores(s)).toList();
+        List<Sample> samples = analysis.samples(ch);
+        Metric metric = ch.getMetric().resolve(samples, now);
+        List<Sample> all = samples.stream().filter(s -> !s.excluded() && !TextFeatures.isAd(s.text()) && metric.scores(s))
+                .sorted(Comparator.comparing(Sample::postedAt)).toList();
         if (all.size() < DraftScore.MIN_POSTS) return List.of();
-        double[] scores = all.stream().mapToDouble(s -> ch.getMetric().score(s)).sorted().toArray();
-        double median = scores[scores.length / 2];
+        double[] ratios = Baseline.ratios(all.stream().mapToDouble(metric::score).toArray());
+        Map<Integer, Double> lift = new HashMap<>();
+        for (int i = 0; i < all.size(); i++) lift.put(all.get(i).messageId(), ratios[i]);
         Map<Integer, Instant> queued = new HashMap<>();
         Set<Integer> recent = new HashSet<>();
         for (Models.Post p : crmId == null ? List.<Models.Post>of() : workspace.workspace().posts()) {
@@ -166,7 +188,7 @@ public class PlannerService {
                 .filter(s -> s.postedAt().isBefore(now.minus(EVERGREEN_AGE)) && s.kind() != PostKind.POLL && !recent.contains(s.messageId()))
                 .map(s -> new Evergreen(s.messageId(), s.postedAt(), s.kind().name(), preview(s.text()),
                         Links.post(ch.getTelegramChatId(), ch.getUsername(), ch.isDemo(), s.messageId()),
-                        round((ch.getMetric().score(s) + 1) / (median + 1)), queued.get(s.messageId())))
+                        round(lift.get(s.messageId())), queued.get(s.messageId())))
                 .filter(e -> e.lift() >= EVERGREEN_LIFT)
                 .sorted(Comparator.comparingDouble(Evergreen::lift).reversed())
                 .limit(EVERGREEN_SHOWN).toList();
