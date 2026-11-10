@@ -12,6 +12,7 @@ import com.halty.gramalyzerbot.growth.GrowthService;
 import com.halty.gramalyzerbot.growth.PromoInput;
 import com.halty.gramalyzerbot.growth.PromoLink;
 import com.halty.gramalyzerbot.i18n.Lang;
+import com.halty.gramalyzerbot.goals.GoalService;
 import com.halty.gramalyzerbot.i18n.Tr;
 import com.halty.gramalyzerbot.post.DemoService;
 import com.halty.gramalyzerbot.post.ImportService;
@@ -68,6 +69,8 @@ public class PrivateFlow {
     private final ViewSpeedScreens viewSpeed;
     private final GapScreens gapScreens;
     private final PlannerScreens plannerScreens;
+    private final GoalScreens goalScreens;
+    private final GoalService goals;
     private final SearchCheckScreens searchCheck;
     private final SwapService swaps;
     private final SettingsScreens settingsScreens;
@@ -193,6 +196,7 @@ public class PrivateFlow {
                 users.setState(u, UserState.AWAIT_DRAFT, String.valueOf(ch.getId()), DRAFT_TTL);
                 gateway.send(chat, plannerScreens.prompt(ch));
             });
+            case "goal", "goals", "streak" -> withChannel(u, chat, (ch, role) -> { users.clearState(u); gateway.send(chat, goalScreens.home(ch, role)); });
             case "evergreen", "repost" -> withChannel(u, chat, (ch, role) -> gateway.send(chat, plannerScreens.evergreen(ch, role)));
             case "swap", "swaps", "crosspromo" -> withChannel(u, chat, (ch, role) -> { users.clearState(u); gateway.send(chat, crossPromo.home(ch, role)); });
             case "team" -> withChannel(u, chat, (ch, role) -> gateway.send(chat, team.home(ch, u, role)));
@@ -348,6 +352,7 @@ public class PrivateFlow {
             case UserState.AWAIT_PROMO -> promoInput(u, chat, Long.parseLong(p.arg()), text);
             case UserState.AWAIT_SWAP_PITCH -> pitchInput(u, chat, Long.parseLong(p.arg()), text);
             case UserState.AWAIT_DRAFT -> draftInput(u, m, Long.parseLong(p.arg()), text);
+            case UserState.AWAIT_GOAL -> goalInput(u, chat, Long.parseLong(p.arg()), text);
             case UserState.AWAIT_BAN -> banInput(u, chat, text);
             case UserState.AWAIT_IMPORT -> gateway.send(chat, View.of(Tr.t("flow.send_file")));
             default -> {
@@ -392,6 +397,21 @@ public class PrivateFlow {
         if ("ALBUM".equals(m.kind()) && text.isEmpty()) return;
         Channel ch = access.require(u, channelId, Permission.VIEW);
         gateway.send(m.chatId(), plannerScreens.score(ch, text, m.kind()));
+    }
+
+    /** "+500", "5000 31.12.2026" and the like; the prompt stays open until it reads. */
+    private void goalInput(User u, long chat, long channelId, String text) {
+        Channel ch = access.require(u, channelId, Permission.CHANGE_SETTINGS);
+        Integer current = goals.status(ch).subscribers();
+        var parsed = GoalService.parse(text, current == null ? 0 : current, java.time.LocalDate.now(ch.zone()));
+        if (parsed.isEmpty()) {
+            gateway.send(chat, View.of(Tr.t("goal.bad_input")).line(Tr.t("goal.prompt_example")));
+            return;
+        }
+        goals.set(ch, parsed.get().target(), parsed.get().deadline(), u.getId());
+        audit.record(ch.getId(), u.getId(), "goal.set", "Set the goal " + parsed.get().target() + " by " + parsed.get().deadline());
+        users.clearState(u);
+        gateway.send(chat, goalScreens.home(ch, access.roleOf(u, ch)));
     }
 
     /** One or two lines that partners see before saying yes to a swap; "-" removes it. */

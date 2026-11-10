@@ -7,6 +7,8 @@ import com.halty.gramalyzerbot.bot.ui.*;
 import com.halty.gramalyzerbot.channel.Channel;
 import com.halty.gramalyzerbot.channel.Links;
 import com.halty.gramalyzerbot.channel.SubscriberService;
+import com.halty.gramalyzerbot.goals.GoalMath;
+import com.halty.gramalyzerbot.goals.GoalService;
 import com.halty.gramalyzerbot.growth.GrowthService;
 import com.halty.gramalyzerbot.post.AnalysisService;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +28,7 @@ public class DigestBuilder {
     private final AnalysisService analysis;
     private final SubscriberService subscribers;
     private final GrowthService growth;
+    private final GoalService goals;
 
     record Week(int posts, int reactions, int comments) {}
 
@@ -61,6 +64,22 @@ public class DigestBuilder {
             v.line(Tr.t("digest.flow", Fmt.num(flow.joined()), Fmt.num(flow.left())));
             flow.gainers().stream().findFirst().ifPresent(p -> v.line(Tr.t("digest.flow_best",
                     Fmt.esc(Fmt.trunc(p.preview().isBlank() ? Labels.kind(p.kind()) : p.preview(), 50)), Fmt.num(p.joined()))));
+        }
+
+        // the goal while it runs (and the week it's reached or missed), then the streak; the digest opens the week, so
+        // this week's count would say nothing yet
+        GoalService.Status gs = goals.status(ch);
+        GoalMath.Progress goal = gs.goal();
+        if (goal != null && !(goal.reachedAt() != null && goal.reachedAt().isBefore(now.minus(Duration.ofDays(8))))
+                && !(goal.state() == GoalMath.State.MISSED && goal.deadline().isBefore(now.atZone(ch.zone()).toLocalDate().minusDays(7)))) {
+            v.blank();
+            v.line(Tr.t("goal.title_short"));
+            GoalScreens.progress(goal).forEach(v::line);
+        }
+        if (gs.streak().weeks() > 0 || gs.streak().best() > 0) {
+            List<String> streak = GoalScreens.streak(gs.streak());
+            v.blank();
+            streak.subList(0, streak.size() - 1).forEach(v::line); // not this week's line: the week has just begun
         }
 
         List<String> play = Playbook.lines(analysis.report(ch));
