@@ -96,6 +96,13 @@ public class Channel {
     @Column(name = "last_leave_alert_at")
     private Instant lastLeaveAlertAt;
 
+    /** Posts a week that keep the posting streak going. */
+    @Column(name = "streak_target", nullable = false)
+    private int streakTarget = 3;
+
+    @Column(name = "last_streak_nudge_at")
+    private Instant lastStreakNudgeAt;
+
     @PrePersist
     void onCreate() {
         if (connectedAt == null) connectedAt = Instant.now();

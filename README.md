@@ -149,6 +149,9 @@ All under `/api`, with the same auth as before (session cookie from `POST /api/l
 | **POST** | **`/api/channels/{id}/fill-slots`** | **new:** `{"postIds": null, "apply": false}` spreads the channel's drafts over the next free good times; `apply: false` only previews |
 | **GET** | **`/api/channels/{id}/evergreen`** | **new:** the channel's best posts from 3+ months ago (`Evergreen`) |
 | **POST** | **`/api/channels/{id}/evergreen/{messageId}`** | **new:** queues a silent repost of that post (an album with all its parts) at the next free good time; 409 when there's none or it's already queued |
+| **GET** | **`/api/channels/{id}/goal`** | **new:** the subscriber goal with its pace and projection, the weekly posting streak, and two suggested goals when there is none (`ChannelGoal`) |
+| **PUT** / **DELETE** | **`/api/channels/{id}/goal`** | **new:** `{"target": 5000, "deadline": "2026-12-31"}` sets the goal (it starts from today's count); DELETE removes it |
+| **PUT** | **`/api/channels/{id}/streak`** | **new:** `{"postsPerWeek": 3}` posts a week that keep the streak going (1–21) |
 | **POST** | **`/api/channels/{id}/cross-promo/swaps/{swapId}/{accept,decline,cancel,end}`** | **new:** answer, take back or end a swap; accepting makes a promo link in both channels |
 | **POST** | **`/api/media?name=`** | **new:** upload a picture, GIF or video for a queued post (raw body with its `Content-Type`; 10 MB for pictures, 50 MB otherwise). Returns `{id, kind, name}` for the post's `media` list. Unused uploads are removed after a day. |
 | GET | `/api/media/{id}` | an uploaded file |
@@ -209,6 +212,12 @@ Nobody outside Telegram knows search counts, so the channel's words come from it
 **Free good times** are the analysis's best weekday/hour cells over the next two weeks, later days counting slightly less, keeping 3 hours from anything queued and no more posts a day than the channel usually publishes (1–3). Channels without enough posts get 9:00, 13:00 and 18:00. The website's Schedule page can spread all drafts over them in one go, the best slot to the oldest draft, after a preview.
 
 **Evergreen reposts** (`/evergreen`, 🔁 on the dashboard, or Schedule on the website) list the channel's posts from 3+ months ago that did 1.3× or more of its median, up to six, best first. A repost is queued silently at the next free good time and sent with `copyMessage` (or `copyMessages` for an album), so pictures and buttons come along without "forwarded from" and without the signature. A post reposted in the last three months isn't offered again; polls are never offered. Sample channels in the bot can't repost.
+
+## Growth goal and posting streak
+
+`/goal` (🎯 on the dashboard, or the website's Overview and Insights) sets a subscriber goal: a number by a date (`goals` package). It starts from the count when it's set. The **pace** is the straight-line change over the last 14 days of subscriber readings (taken every 6 hours), and the projection carries it on to the deadline, so it's a trend, not a forecast. A goal is *on track* when that projection reaches the target, *behind* when it doesn't, and *too early to tell* until there are two readings at least two days apart. Without a goal, two are suggested: what the current pace reaches by the end of this month (rounded down, so it starts on track) and a third more than the pace over about three months. In the bot, `+500`, `5000`, `5k` or `+1.5k 31.12.2026` all work.
+
+The **posting streak** counts weeks in a row (Monday to Sunday in the channel's timezone) with at least the chosen number of posts (3 by default, 1–21). This week counts once it has them, and until then the streak stays alive. The weekly digest shows the goal and the streak. The team gets one message when the goal is reached, and on Saturday from 10:00 the people who get nudges hear when a streak of 2+ weeks will end unless more posts go out that week.
 
 ## Cross-promo
 

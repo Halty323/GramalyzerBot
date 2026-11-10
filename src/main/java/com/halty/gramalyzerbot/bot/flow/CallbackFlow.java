@@ -4,6 +4,7 @@ import com.halty.gramalyzerbot.analytics.Metric;
 import com.halty.gramalyzerbot.bot.BotApi;
 import com.halty.gramalyzerbot.bot.event.Events;
 import com.halty.gramalyzerbot.bot.screen.*;
+import com.halty.gramalyzerbot.goals.GoalService;
 import com.halty.gramalyzerbot.bot.ui.*;
 import com.halty.gramalyzerbot.channel.*;
 import com.halty.gramalyzerbot.common.UserFacingException;
@@ -30,6 +31,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.DayOfWeek;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.ZoneId;
 import com.halty.gramalyzerbot.planner.PlannerService;
 import com.halty.gramalyzerbot.workspace.Models;
@@ -66,6 +68,8 @@ public class CallbackFlow {
     private final ViewSpeedScreens viewSpeed;
     private final GapScreens gapScreens;
     private final PlannerScreens plannerScreens;
+    private final GoalScreens goalScreens;
+    private final GoalService goals;
     private final PlannerService planner;
     private final SearchCheckScreens searchCheck;
     private final SwapService swaps;
@@ -131,6 +135,7 @@ public class CallbackFlow {
                 yield Toast.NONE;
             }
             case "ev" -> evergreen(u, c, a);
+            case "goal" -> goal(u, c, a);
             case "seo" -> {
                 show(c, searchCheck.show(access.require(u, a.getLong(2), Permission.VIEW)));
                 yield Toast.NONE;
@@ -217,6 +222,32 @@ public class CallbackFlow {
     }
 
     // ------------------------------------------------------------------ evergreen reposts
+
+    private Toast goal(User u, Events.Callback c, Cb.Args a) {
+        String action = a.get(1);
+        Channel ch = access.require(u, a.getLong(2), action.equals("show") ? Permission.VIEW : Permission.CHANGE_SETTINGS);
+        switch (action) {
+            case "show" -> users.clearState(u);
+            case "new" -> {
+                users.setState(u, UserState.AWAIT_GOAL, String.valueOf(ch.getId()), Duration.ofMinutes(15));
+                show(c, goalScreens.prompt(ch, goals.status(ch).subscribers()));
+                return Toast.NONE;
+            }
+            case "set" -> {
+                LocalDate deadline = LocalDate.ofEpochDay(a.getLong(4));
+                goals.set(ch, a.getInt(3), deadline, u.getId());
+                audit.record(ch.getId(), u.getId(), "goal.set", "Set the goal " + a.getInt(3) + " by " + deadline);
+            }
+            case "del" -> {
+                goals.clear(ch);
+                audit.record(ch.getId(), u.getId(), "goal.clear", "Removed the goal");
+            }
+            case "ppw" -> ch = goals.setStreakTarget(ch, a.getInt(3));
+            default -> throw new IllegalArgumentException("unknown goal " + action);
+        }
+        show(c, goalScreens.home(ch, access.roleOf(u, ch)));
+        return action.equals("set") ? Toast.of(Tr.t("goal.saved")) : Toast.NONE;
+    }
 
     private Toast evergreen(User u, Events.Callback c, Cb.Args a) {
         String action = a.get(1);

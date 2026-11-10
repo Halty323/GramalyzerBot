@@ -5,6 +5,10 @@ import com.halty.gramalyzerbot.analytics.Schedule;
 import com.halty.gramalyzerbot.billing.BillingService;
 import com.halty.gramalyzerbot.bot.BotApi;
 import com.halty.gramalyzerbot.bot.screen.DigestBuilder;
+import com.halty.gramalyzerbot.bot.screen.GoalScreens;
+import com.halty.gramalyzerbot.goals.Goal;
+import com.halty.gramalyzerbot.goals.GoalMath;
+import com.halty.gramalyzerbot.goals.GoalService;
 import com.halty.gramalyzerbot.bot.ui.Btn;
 import com.halty.gramalyzerbot.bot.ui.Cb;
 import com.halty.gramalyzerbot.bot.ui.Fmt;
@@ -26,6 +30,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.util.EnumMap;
@@ -49,6 +54,7 @@ public class ScheduledJobs {
     private final AnalysisService analysis;
     private final PostService posts;
     private final DigestBuilder digests;
+    private final GoalService goals;
     private final BotApi gateway;
     private final BillingService billing;
 
@@ -72,6 +78,8 @@ public class ScheduledJobs {
                 if (!billing.covers(ch)) continue; // paused: the owner's plan covers fewer channels than they connected
                 digest(ch, now);
                 nudge(ch, now);
+                goalReached(ch, now);
+                streakAtRisk(ch, now);
             } catch (RuntimeException e) {
                 log.warn("Scheduled work failed for channel {}", ch.getId(), e);
             }
@@ -113,6 +121,47 @@ public class ScheduledJobs {
                     .line(Tr.t("nudge.slot", Fmt.esc(channel.getTitle()), Labels.slot(slot), Fmt.lift(slot.lift())))
                     .line(Tr.t("nudge.last", lastPost == null ? Tr.t("home.none_yet") : Fmt.ago(lastPost, now)))
                     .row(Btn.cb(Tr.t("btn.content"), Cb.of("nav:content", channel.getId(), channel.getWindowDays(), "main")))));
+            gateway.send(u.getTelegramId(), v);
+            pause();
+        }
+    }
+
+    /** Once, when the subscriber count first reaches the goal. */
+    private void goalReached(Channel ch, Instant now) {
+        Optional<Goal> reached = goals.reachedNow(ch);
+        if (reached.isEmpty()) return;
+        Goal g = reached.get();
+        long early = java.time.temporal.ChronoUnit.DAYS.between(now.atZone(ch.zone()).toLocalDate(), g.getDeadline());
+        Map<Lang, View> byLang = new EnumMap<>(Lang.class);
+        for (User u : membership.recipients(ch, false)) {
+            View v = byLang.computeIfAbsent(Lang.of(u), l -> Tr.in(l, () -> View.of(Tr.t("goal.reached_title", Fmt.esc(ch.getTitle()), Fmt.num(g.getTarget())))
+                    .line(early > 0 ? Tr.t("goal.reached_early", Tr.n("n.days", early)) : Tr.t("goal.reached_late"))
+                    .row(Btn.cb(Tr.t("goal.btn.next"), Cb.of("goal:show", ch.getId())))));
+            gateway.send(u.getTelegramId(), v);
+            pause();
+        }
+    }
+
+    /**
+     * On the weekend, once a week: a running posting streak that this week hasn't kept up yet. Saturday from 10:00 in
+     * the channel's timezone leaves a day and a half to post.
+     */
+    private void streakAtRisk(Channel ch, Instant now) {
+        ZonedDateTime local = now.atZone(ch.zone());
+        if (local.getDayOfWeek() != DayOfWeek.SATURDAY && local.getDayOfWeek() != DayOfWeek.SUNDAY || local.getHour() < 10) return;
+        Instant monday = local.toLocalDate().with(java.time.temporal.TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).atStartOfDay(ch.zone()).toInstant();
+        if (ch.getLastStreakNudgeAt() != null && ch.getLastStreakNudgeAt().isAfter(monday)) return;
+        GoalMath.Streak s = goals.streak(ch, now);
+        if (!s.atRisk() || s.weeks() < 2) return; // a one-week streak isn't worth a message
+        List<User> recipients = membership.recipients(ch, true);
+        ch.setLastStreakNudgeAt(now);
+        Channel channel = channels.save(ch);
+        Map<Lang, View> byLang = new EnumMap<>(Lang.class);
+        for (User u : recipients) {
+            View v = byLang.computeIfAbsent(Lang.of(u), l -> Tr.in(l, () -> View.of(Tr.t("goal.risk_title", Fmt.esc(channel.getTitle()), Tr.n("n.weeks", s.weeks())))
+                    .line(Tr.t("goal.risk_text", s.missing(), Tr.n("n.days", s.daysLeft())))
+                    .row(Btn.cb(Tr.t("btn.times"), Cb.of("nav:times", channel.getId(), channel.getWindowDays(), "main")),
+                            Btn.cb(Tr.t("btn.goal"), Cb.of("goal:show", channel.getId())))));
             gateway.send(u.getTelegramId(), v);
             pause();
         }

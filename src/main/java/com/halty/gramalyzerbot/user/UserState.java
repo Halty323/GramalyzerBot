@@ -12,6 +12,7 @@ public final class UserState {
     public static final String AWAIT_PROMO = "AWAIT_PROMO";
     public static final String AWAIT_SWAP_PITCH = "AWAIT_SWAP_PITCH";
     public static final String AWAIT_DRAFT = "AWAIT_DRAFT";
+    public static final String AWAIT_GOAL = "AWAIT_GOAL";
 
     private UserState() {}
 }
