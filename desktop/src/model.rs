@@ -265,10 +265,41 @@ pub struct FeedPost {
     /// The post's picture (a photo, a video's thumbnail); only posts read from the public t.me page have one.
     #[serde(default)]
     pub media_url: Option<String>,
+    /// Every photo and video of the post, an album's in Telegram's order and layout; empty when the source has none.
+    #[serde(default)]
+    pub media: Vec<FeedMedia>,
     pub url: Option<String>,
     pub forwarded_from: Option<String>,
     #[serde(default)]
     pub edited: bool,
+}
+
+/// A photo, or a video's thumbnail, with its place in the album as Telegram lays it out: x and w from 0 to 1 of the
+/// album's width, y and h in the same unit (a square picture as wide as the album has h 1). None when unknown.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct FeedMedia {
+    pub url: String,
+    #[serde(default)]
+    pub video: bool,
+    pub x: Option<f64>,
+    pub y: Option<f64>,
+    pub w: Option<f64>,
+    pub h: Option<f64>,
+}
+
+impl FeedPost {
+    /// The photos and videos to draw. A post stored before albums were read in full has its first picture only.
+    pub fn pictures(&self) -> Vec<FeedMedia> {
+        if !self.media.is_empty() {
+            return self.media.clone();
+        }
+        match (&self.media_url, self.kind.as_str()) {
+            (Some(url), kind @ ("PHOTO" | "ALBUM" | "VIDEO" | "ANIMATION")) => {
+                vec![FeedMedia { url: url.clone(), video: matches!(kind, "VIDEO" | "ANIMATION"), x: None, y: None, w: None, h: None }]
+            }
+            _ => vec![],
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]

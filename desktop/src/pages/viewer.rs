@@ -1,12 +1,17 @@
 //! Channel viewer: any channel's posts as Telegram shows them, with its numbers and an AI teardown.
+use crate::album;
 use crate::app::{AiSlot, App, Loaded, Message, Source, local};
-use crate::model::{FeedPost, TrackedStats};
+use crate::model::{FeedMedia, FeedPost, TrackedStats};
 use crate::pages::ai_output;
 use crate::theme;
 use crate::ui::*;
 use crate::view::{channel_avatar, tracked_avatar};
-use iced::widget::{button, column, container, image, row, text, text_input};
-use iced::{Alignment, Element, Length, Padding};
+use iced::widget::{Stack, button, column, container, image, row, stack, text, text_input};
+use iced::{Alignment, ContentFit, Element, Length, Padding};
+
+/// How wide a message with pictures is, and how tall its pictures may get.
+const PICTURES_WIDTH: f32 = 420.0;
+const PICTURES_MAX_HEIGHT: f32 = 520.0;
 
 pub fn view(app: &App) -> Element<'_, Message> {
     let rtl = app.rtl();
@@ -176,17 +181,19 @@ fn chat(app: &App) -> Element<'_, Message> {
 fn post<'a>(app: &'a App, p: &FeedPost, channel: &str) -> Element<'a, Message> {
     let i = &app.i18n;
     let rtl = app.rtl();
+    let pictures = p.pictures();
     let kind_icon = match p.kind.as_str() {
         "PHOTO" | "ALBUM" => Some(Icon::Image),
         "VIDEO" | "ANIMATION" | "VIDEO_NOTE" => Some(Icon::Video),
         "TEXT" => None,
         _ => Some(Icon::FileText),
     };
-    let mut col = column![text(channel.to_string()).font(INTER_SEMIBOLD).size(13).style(|th: &iced::Theme| text::Style { color: Some(theme::tokens(th).accent) })].spacing(5);
+    let mut head = column![text(channel.to_string()).font(INTER_SEMIBOLD).size(13).style(|th: &iced::Theme| text::Style { color: Some(theme::tokens(th).accent) })].spacing(5);
     if let Some(from) = &p.forwarded_from {
-        col = col.push(row![icon_tinted(Icon::Forward, 12, "muted"), small(i.tv("view.forwarded", &[("name", from)]))].spacing(5));
+        head = head.push(row![icon_tinted(Icon::Forward, 12, "muted"), small(i.tv("view.forwarded", &[("name", from)]))].spacing(5));
     }
-    if let Some(k) = kind_icon {
+    let mut col = column![].spacing(5);
+    if let Some(k) = kind_icon.filter(|_| pictures.is_empty()) {
         let key = format!("kind.{}", p.kind);
         col = col.push(container(row![icon_tinted(k, 15, "muted"), small(if i.has(&key) { app.t(&key) } else { p.kind.clone() })].spacing(6).align_y(Alignment::Center)).padding(Padding::from([8, 10])).style(theme::inset).width(Length::Fill));
     }
@@ -211,7 +218,40 @@ fn post<'a>(app: &'a App, p: &FeedPost, channel: &str) -> Element<'a, Message> {
         meta.push(button(icon(Icon::External, 11)).padding(2).style(theme::ghost).on_press(Message::OpenUrl(url.clone())).into());
     }
     col = col.push(dir_row(rtl, meta).spacing(8).align_y(Alignment::Center));
-    container(container(col).padding(Padding::from([9, 12])).style(theme::bubble).max_width(560)).width(Length::Fill).align_x(if rtl { Alignment::End } else { Alignment::Start }).into()
+    let bubble = if pictures.is_empty() {
+        container(column![head, col].spacing(5)).padding(Padding::from([9, 12])).style(theme::bubble).max_width(560)
+    } else {
+        // the pictures go from edge to edge, as in Telegram
+        let edge = |top: f32, bottom: f32| Padding { top, right: 12.0, bottom, left: 12.0 };
+        container(column![container(head).padding(edge(9.0, 7.0)), album_view(app, p, &pictures), container(col).padding(edge(7.0, 9.0))]).style(theme::bubble).width(PICTURES_WIDTH)
+    };
+    container(bubble).width(Length::Fill).align_x(if rtl { Alignment::End } else { Alignment::Start }).into()
+}
+
+/// A post's photos and videos: one in its own shape, an album in the mosaic Telegram gives it. Each opens full size.
+fn album_view<'a>(app: &'a App, p: &FeedPost, items: &[FeedMedia]) -> Element<'a, Message> {
+    let (tiles, height) = album::layout(items);
+    let natural = (height as f32 * PICTURES_WIDTH).max(1.0);
+    let total = natural.min(PICTURES_MAX_HEIGHT);
+    // a very tall album is squeezed, and its pictures cropped to fit
+    let squeeze = total / natural;
+    let mut layers = Stack::new().width(PICTURES_WIDTH).height(total);
+    for (index, (m, t)) in items.iter().zip(tiles).enumerate() {
+        let (x, y) = (t.x as f32 * PICTURES_WIDTH, t.y as f32 * PICTURES_WIDTH * squeeze);
+        let (w, h) = (t.w as f32 * PICTURES_WIDTH, t.h as f32 * PICTURES_WIDTH * squeeze);
+        let picture: Element<Message> = match app.photos.get(&m.url) {
+            Some(handle) => image(handle.clone()).content_fit(ContentFit::Cover).width(w).height(h).into(),
+            None => container(icon_tinted(Icon::Image, 20, "muted")).center_x(w).center_y(h).style(theme::picture_slot).into(),
+        };
+        let tile: Element<Message> = if m.video {
+            stack![picture, container(container(icon(Icon::Play, 16)).center(40).style(theme::play_mark)).center_x(w).center_y(h)].into()
+        } else {
+            picture
+        };
+        let open = button(tile).padding(0).style(theme::picture).on_press(Message::Zoom(p.id.clone(), index));
+        layers = layers.push(container(open).padding(Padding { top: y, right: 0.0, bottom: 0.0, left: x }));
+    }
+    layers.into()
 }
 
 /// Figures from the posts themselves, for channels the backend has no preview statistics for.

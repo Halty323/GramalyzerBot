@@ -318,6 +318,10 @@
   "view.no_posts": "No posts to show.",
   "view.forwarded": "Forwarded from {name}",
   "view.edited": "edited",
+  "view.picture_n": "{index} of {total}",
+  "view.prev_picture": "Previous",
+  "view.next_picture": "Next",
+  "view.play_in_tg": "Play in Telegram",
 
   "watch.add_label": "Track a public channel",
   "watch.add_text": "Competitors, inspiration, partners: the backend checks their public page every couple of hours.",

@@ -543,6 +543,7 @@ mod tests {
             reaction_list: vec![],
             comments: None,
             media_url: None,
+            media: vec![],
             url: None,
             forwarded_from: None,
             edited: false,
