@@ -1,12 +1,12 @@
 //! The window: sign-in and connection screens, then the sidebar, the top bar, the current page and the toast.
-use crate::app::{App, Conn, Message, Page};
+use crate::app::{App, Conn, Message, Page, Zoom};
 use crate::i18n::LANGS;
 use crate::model::{Channel, PostStatus, TrackedSummary};
 use crate::pages;
 use crate::theme;
 use crate::ui::*;
-use iced::widget::{Space, button, center, column, container, image, opaque, pick_list, row, stack, text, text_input};
-use iced::{Alignment, Element, Length, Padding};
+use iced::widget::{Space, button, center, column, container, image, mouse_area, opaque, pick_list, row, stack, text, text_input};
+use iced::{Alignment, ContentFit, Element, Length, Padding};
 use std::fmt;
 
 /// An option in a pick list: what it stands for and what it shows.
@@ -55,6 +55,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
         Conn::Ready => shell(app),
     };
     let mut layers = stack![content];
+    if let Some(z) = &app.zoom {
+        layers = layers.push(zoom(app, z));
+    }
     if let Some((msg, _)) = &app.toast {
         let toast = container(
             row![icon_tinted(Icon::CheckCircle, 16, "success"), text(msg.clone()).font(INTER).size(13.5), button(icon(Icon::X, 13)).style(theme::ghost).padding(4).on_press(Message::DismissToast)]
@@ -66,6 +69,50 @@ pub fn view(app: &App) -> Element<'_, Message> {
         layers = layers.push(container(opaque(toast)).width(Length::Fill).height(Length::Fill).align_x(Alignment::Center).align_y(Alignment::End).padding(24));
     }
     layers.into()
+}
+
+/// A post's picture full size, like Telegram's media viewer: the arrow buttons or keys go through an album; Esc, the
+/// close button or a click beside the picture closes it.
+fn zoom<'a>(app: &'a App, z: &Zoom) -> Element<'a, Message> {
+    let rtl = app.rtl();
+    let item = &z.items[z.index];
+    let many = z.items.len() > 1;
+    let round = |i: Icon, size: u16, tip: String, on: Message| with_tip(button(container(icon(i, size)).center(26)).padding(9).style(theme::lightbox_button).on_press(on), tip);
+    let counter = if many { app.i18n.tv("view.picture_n", &[("index", &(z.index + 1).to_string()), ("total", &z.items.len().to_string())]) } else { String::new() };
+    let mut bar = vec![text(counter).font(INTER_SEMIBOLD).size(14).into(), hspace()];
+    if let Some(url) = &z.url {
+        bar.push(round(Icon::External, 17, app.t("view.open_tg"), Message::OpenUrl(url.clone())));
+    }
+    bar.push(round(Icon::X, 18, app.t("studio.close"), Message::ZoomClose));
+
+    // fills the room in its own shape and takes only the picture's space: a click on it keeps it open, a click beside it closes it
+    let picture: Element<Message> = match app.photos.get(&item.url) {
+        Some(h) => opaque(image(h.clone()).content_fit(ContentFit::Contain).expand(true)),
+        None => icon(Icon::Loader, 28),
+    };
+    let mut stage = stack![container(picture).padding(Padding::from([0, 80])).center(Length::Fill)];
+    if let (true, Some(url)) = (item.video, &z.url) {
+        let play = button(row![icon(Icon::Play, 16), text(app.t("view.play_in_tg")).font(INTER_SEMIBOLD).size(14)].spacing(8).align_y(Alignment::Center))
+            .padding(Padding::from([12, 20]))
+            .style(theme::over_picture)
+            .on_press(Message::OpenUrl(url.clone()));
+        stage = stage.push(container(play).center(Length::Fill));
+    }
+    if many {
+        // in right-to-left languages the next picture is to the left
+        let (back, ahead) = (app.t("view.prev_picture"), app.t("view.next_picture"));
+        let (left, right, step) = if rtl { (ahead, back, -1) } else { (back, ahead, 1) };
+        stage = stage
+            .push(container(round(Icon::ChevronLeft, 26, left, Message::ZoomStep(-step))).height(Length::Fill).align_y(Alignment::Center).padding(14))
+            .push(container(round(Icon::ChevronRight, 26, right, Message::ZoomStep(step))).width(Length::Fill).height(Length::Fill).align_x(Alignment::End).align_y(Alignment::Center).padding(14));
+    }
+    let mut body = column![row(bar).spacing(8).align_y(Alignment::Center).padding(Padding::from([12, 20])), stage].height(Length::Fill);
+    let caption: String = z.caption.chars().take(300).collect();
+    if !caption.trim().is_empty() {
+        let more = if z.caption.chars().count() > 300 { "…" } else { "" };
+        body = body.push(container(text(format!("{}{more}", caption.trim_end())).font(INTER).size(14).line_height(1.45).center()).width(Length::Fill).max_height(140).center_x(Length::Fill).padding(Padding::from([12, 24])));
+    }
+    opaque(mouse_area(container(body).style(theme::lightbox).width(Length::Fill).height(Length::Fill)).on_press(Message::ZoomClose))
 }
 
 fn brand<'a>() -> Element<'a, Message> {

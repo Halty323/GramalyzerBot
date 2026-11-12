@@ -138,6 +138,61 @@ pub fn user_bubble(theme: &Theme) -> container::Style {
     }
 }
 
+/// A picture in a message: no frame, no fill.
+pub fn picture(_theme: &Theme, _status: button::Status) -> button::Style {
+    button::Style { background: None, text_color: Color::WHITE, border: Border::default(), shadow: Shadow::default(), snap: true }
+}
+
+/// Where a picture goes while it loads, or when it can't be loaded.
+pub fn picture_slot(theme: &Theme) -> container::Style {
+    container::Style { background: Some(tokens(theme).surface2.into()), ..Default::default() }
+}
+
+/// The round play mark on a video's picture.
+pub fn play_mark(_theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Color { a: 0.55, ..Color::BLACK }.into()),
+        border: Border { radius: 20.0.into(), ..Border::default() },
+        text_color: Some(Color::WHITE),
+        ..Default::default()
+    }
+}
+
+/// The dark room a picture opens full size in.
+pub fn lightbox(_theme: &Theme) -> container::Style {
+    container::Style { background: Some(color!(0x0b0912, 0.96).into()), text_color: Some(Color::WHITE), ..Default::default() }
+}
+
+/// Round buttons on the dark room's background.
+pub fn lightbox_button(_theme: &Theme, status: button::Status) -> button::Style {
+    let a = match status {
+        button::Status::Hovered | button::Status::Pressed => 0.2,
+        _ => 0.08,
+    };
+    button::Style {
+        background: Some(Color { a, ..Color::WHITE }.into()),
+        text_color: Color::WHITE,
+        border: Border { radius: 24.0.into(), ..Border::default() },
+        shadow: Shadow::default(),
+        snap: true,
+    }
+}
+
+/// A button laid over a picture (Play in Telegram), dark so it reads on any picture.
+pub fn over_picture(_theme: &Theme, status: button::Status) -> button::Style {
+    let a = match status {
+        button::Status::Hovered | button::Status::Pressed => 0.8,
+        _ => 0.62,
+    };
+    button::Style {
+        background: Some(Color { a, ..Color::BLACK }.into()),
+        text_color: Color::WHITE,
+        border: Border { radius: 24.0.into(), width: 1.0, color: Color { a: 0.18, ..Color::WHITE } },
+        shadow: Shadow::default(),
+        snap: true,
+    }
+}
+
 pub fn chat_wall(theme: &Theme) -> container::Style {
     let t = tokens(theme);
     let wall = if theme.extended_palette().is_dark { color!(0x0f1219) } else { color!(0xe9edf2) };

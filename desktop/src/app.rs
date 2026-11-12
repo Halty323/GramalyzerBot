@@ -170,6 +170,26 @@ pub enum Loaded {
     Detail(TrackedDetail),
 }
 
+impl Loaded {
+    /// Every post the viewer can show, published and scheduled.
+    pub fn posts(&self) -> impl Iterator<Item = &FeedPost> {
+        let (posts, scheduled): (&[FeedPost], &[FeedPost]) = match self {
+            Loaded::Feed(f) => (&f.posts, &f.scheduled),
+            Loaded::Detail(d) => (&d.posts, &[]),
+        };
+        posts.iter().chain(scheduled)
+    }
+}
+
+/// A post's pictures open full size, like Telegram's media viewer.
+#[derive(Debug, Clone)]
+pub struct Zoom {
+    pub items: Vec<FeedMedia>,
+    pub index: usize,
+    pub caption: String,
+    pub url: Option<String>,
+}
+
 #[derive(Debug, Default)]
 pub struct Viewer {
     pub source: Option<Source>,
@@ -265,8 +285,10 @@ pub struct App {
     pub looking: HashSet<String>,
     /// Whether the AI panels show what the AI knows of the channel in full.
     pub knows_open: bool,
+    /// Channel photos and post pictures, by address.
     pub photos: HashMap<String, image::Handle>,
     requested_photos: HashSet<String>,
+    pub zoom: Option<Zoom>,
     pub page: Page,
     /// The channel the pages focus on; None = all channels.
     pub channel: Option<String>,
@@ -301,6 +323,10 @@ pub enum Message {
     LookAgain(String),
     KnowsToggle,
     Photo(String, Option<Vec<u8>>),
+    /// A post's picture was clicked: the post's id and which of its pictures.
+    Zoom(String, usize),
+    ZoomStep(isize),
+    ZoomClose,
     Navigate(Page),
     SelectChannel(Option<String>),
     Period(i64),
@@ -495,6 +521,7 @@ impl App {
             knows_open: false,
             photos: HashMap::new(),
             requested_photos: HashSet::new(),
+            zoom: None,
             page: Page::Dashboard,
             channel: None,
             period: 28,
@@ -673,6 +700,12 @@ impl App {
             return Task::none();
         }
         Task::perform(self.client.clone().image(url.clone()), move |b| Message::Photo(url.clone(), b))
+    }
+
+    /// The pictures of the posts the viewer shows.
+    fn want_pictures(&mut self) -> Task<Message> {
+        let urls: Vec<String> = self.viewer.loaded.iter().flat_map(|l| l.posts()).flat_map(|p| p.pictures()).map(|m| m.url).collect();
+        Task::batch(urls.into_iter().map(|u| self.want_photo(Some(u))).collect::<Vec<_>>())
     }
 
     /// The insights a page needs right now.
@@ -911,6 +944,20 @@ impl App {
                     self.photos.insert(url, image::Handle::from_bytes(b));
                 }
             }
+            Message::Zoom(id, index) => {
+                if let Some(p) = self.viewer.loaded.iter().flat_map(|l| l.posts()).find(|p| p.id == id) {
+                    let items = p.pictures();
+                    if index < items.len() {
+                        self.zoom = Some(Zoom { items, index, caption: p.text.clone(), url: p.url.clone() });
+                    }
+                }
+            }
+            Message::ZoomStep(step) => {
+                if let Some(z) = &mut self.zoom {
+                    z.index = (z.index as isize + step).rem_euclid(z.items.len() as isize) as usize;
+                }
+            }
+            Message::ZoomClose => self.zoom = None,
             Message::Navigate(p) => {
                 self.page = p;
                 self.error = None;
@@ -974,6 +1021,18 @@ impl App {
                 }
             }
             Message::Key(key, mods) => {
+                if self.zoom.is_some() {
+                    use keyboard::key::Named;
+                    // the arrow pointing at the next picture: in right-to-left languages it is on the left
+                    let next = if self.rtl() { -1 } else { 1 };
+                    match &key {
+                        keyboard::Key::Named(Named::Escape) => self.zoom = None,
+                        keyboard::Key::Named(Named::ArrowRight) => return self.update(Message::ZoomStep(next)),
+                        keyboard::Key::Named(Named::ArrowLeft) => return self.update(Message::ZoomStep(-next)),
+                        _ => {}
+                    }
+                    return Task::none();
+                }
                 if mods.command() {
                     if let keyboard::Key::Character(c) = &key {
                         match c.as_str() {
@@ -1406,6 +1465,7 @@ impl App {
             // ---------- Viewer ----------
             Message::View(source) => {
                 self.page = Page::Viewer;
+                self.zoom = None;
                 if self.viewer.source.as_ref() != Some(&source) {
                     self.viewer.loaded = None;
                     self.viewer.ai = AiRun { generation: self.viewer.ai.generation + 1, ..Default::default() };
@@ -1449,7 +1509,7 @@ impl App {
                             }
                         };
                         self.viewer.loaded = Some(l);
-                        return Task::batch([self.want_photo(photo), look]);
+                        return Task::batch([self.want_photo(photo), look, self.want_pictures()]);
                     }
                     Err(e) => self.viewer.error = Some(e),
                 }
